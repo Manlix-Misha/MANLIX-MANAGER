@@ -21,3 +21,20 @@ except Exception as e:
 
 if __name__ == "__main__":
     bot.run_forever()
+
+
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_port():
+    server = HTTPServer(('0.0.0.0', 10000), Handler)
+    server.serve_forever()
+
+# Запускаем "пустой" порт в отдельном потоке
+threading.Thread(target=run_port, daemon=True).start()
