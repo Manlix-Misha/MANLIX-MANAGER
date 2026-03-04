@@ -3,7 +3,7 @@ import asyncio
 from vkbottle.bot import Bot, Message
 
 # Бот берет токен из настроек Render
-bot = Bot(token=os.getenv("vk1.a.zO2-xuoj9MmSPQh_BW4OfZMyUnGiNi51dcVOi8p9LftPJYnlDZ5XACnWU2ocXcjwtTGhml3s3HY7Wz_67ZToAO8G9Um9MYozF2CvpqLgsC2U8rWPmSuRwUqGwI0u95SrWqyjO7d6hMgH1iHjC4swP8d2p_-6EI44sxY9zLFMPaAyfIc-9CE4pwRjINH6PVL9IzXipRJUWUAMallsQ0oa1g"))
+bot = Bot(token=os.getenv("TOKEN"))
 
 # КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ
 @bot.on.message(text="/info")
