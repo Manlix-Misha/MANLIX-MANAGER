@@ -48,33 +48,56 @@ async def is_muted(message: Message):
                     peer_id=message.peer_id,
                     delete_for_all=True
                 )
-            except:
-                pass
+            except: pass
             return True
     return False
 
 # --- 3. ИНИЦИАЛИЗАЦИЯ ---
 bot = Bot(token=os.environ.get("TOKEN"))
 
-# --- 4. КОМАНДА /HELP (ИСПРАВЛЕНО) ---
+# --- 4. КОМАНДА /HELP (РАЗДЕЛЕНА НА СООБЩЕНИЯ) ---
 @bot.on.message(text="/help")
 async def help_handler(message: Message):
     if await is_muted(message): return
-    if message.peer_id not in ACTIVE_CHATS and not has_access(message.from_id, "Специальный Руководитель"):
+    
+    # Авто-активация чата для Спец. Руководителя
+    if has_access(message.from_id, "Специальный Руководитель"):
+        ACTIVE_CHATS.add(message.peer_id)
+    
+    if message.peer_id not in ACTIVE_CHATS:
         return "Ошибка: беседа не активирована."
 
-    help_msg = "Команды пользователей:\n/info - Официальные ресурсы\n/stats - Ваша статистика\n/getid - Получить ссылку на профиль\n\n"
+    # Сообщение 1: Пользователи
+    await message.answer(
+        "Команды пользователей:\n"
+        "/info - Официальные ресурсы\n"
+        "/stats - Ваша статистика\n"
+        "/getid - Получить ссылку на профиль"
+    )
     
+    # Сообщение 2: Модераторы
     if has_access(message.from_id, "Модератор"):
-        help_msg += "Команды модераторов:\n/kick - Исключить пользователя\n/mute - Выдать блокировку чата\n\n"
+        await message.answer(
+            "Команды модераторов:\n"
+            "/kick - Исключить пользователя\n"
+            "/mute - Выдать блокировку чата"
+        )
         
+    # Сообщение 3: Руководство (Отдельным сообщением)
     if has_access(message.from_id, "Заместитель Специального Руководителя"):
-        help_msg += "Команды руководства:\n/gstaff - Список высшего руководства\n/gbanpl - Выдать глобальный бан\n/gunbanpl - Снять глобальный бан\n\n"
+        await message.answer(
+            "Команды руководства:\n"
+            "/gstaff - Список высшего руководства\n"
+            "/gbanpl - Выдать глобальный бан\n"
+            "/gunbanpl - Снять глобальный бан"
+        )
         
+    # Сообщение 4: Спец. Руководитель
     if has_access(message.from_id, "Специальный Руководитель"):
-        help_msg += "Команды Спец. Руководителя:\n/sync - Синхронизация беседы"
-        
-    await message.answer(help_msg)
+        await message.answer(
+            "Команды Спец. Руководителя:\n"
+            "/sync - Синхронизация беседы"
+        )
 
 # --- 5. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ ---
 @bot.on.message(text="/info")
@@ -99,12 +122,12 @@ async def kick_handler(message: Message, args=None):
     if await is_muted(message): return
     if not has_access(message.from_id, "Модератор"): return
     target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
-    if not target_id: return "Укажите пользователя ссылкой или ответом."
+    if not target_id: return "Укажите пользователя."
     try:
         await message.ctx_api.messages.remove_chat_user(chat_id=message.peer_id - 2000000000, user_id=target_id)
         await message.answer(f"Пользователь [id{target_id}|ID {target_id}] исключен.")
     except Exception as e:
-        await message.answer(f"Ошибка при исключении: {e}")
+        await message.answer(f"Ошибка: {e}")
 
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_handler(message: Message, args=None):
@@ -119,7 +142,7 @@ async def mute_handler(message: Message, args=None):
     nick = USER_DATA.get(message.from_id, ["", "Admin"])[1]
     await message.answer(f"Администратор [id{message.from_id}|{nick}] выдал блокировку чата [id{target_id}|пользователю] на {minutes} минут.")
 
-# --- 7. РУКОВОДСТВО (ФИКС ССЫЛОК) ---
+# --- 7. РУКОВОДСТВО ---
 @bot.on.message(text="/sync")
 async def sync_handler(message: Message):
     if await is_muted(message): return
@@ -131,13 +154,16 @@ async def sync_handler(message: Message):
 @bot.on.message(text="/gstaff")
 async def gstaff_handler(message: Message):
     if await is_muted(message): return
+    # Добавил принудительную активацию, если пишет Спец. Руководитель
+    if has_access(message.from_id, "Специальный Руководитель"):
+        ACTIVE_CHATS.add(message.peer_id)
+        
     if message.peer_id not in ACTIVE_CHATS: return
     if not has_access(message.from_id, "Заместитель Специального Руководителя"): return
     
     spec_boss = "- [id870757778|Misha Manlix]"
     deputy_list = [f"- [id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == "Заместитель Специального Руководителя"]
-    deputy_str = "\n".join(deputy_list[:2])
-    if not deputy_str: deputy_str = "- Отсутствует.\n- Отсутствует."
+    deputy_str = "\n".join(deputy_list[:2]) if deputy_list else "- Отсутствует.\n- Отсутствует."
     
     res = (
         "MANLIX MANAGER | Команда Бота:\n\n"
@@ -166,4 +192,3 @@ def run_port():
 
 threading.Thread(target=run_port, daemon=True).start()
 bot.run_forever()
-
