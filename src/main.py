@@ -26,7 +26,8 @@ def get_rank(user_id):
     return USER_DATA.get(user_id, ["Пользователь"])[0]
 
 def has_access(user_id, required_rank):
-    return RANK_WEIGHT.get(get_rank(user_id), 0) >= RANK_WEIGHT.get(required_rank, 0)
+    user_rank = get_rank(user_id)
+    return RANK_WEIGHT.get(user_rank, 0) >= RANK_WEIGHT.get(required_rank, 0)
 
 def extract_id(text):
     if not text: return None
@@ -55,23 +56,23 @@ async def is_muted(message: Message):
 # --- 3. ИНИЦИАЛИЗАЦИЯ ---
 bot = Bot(token=os.environ.get("TOKEN"))
 
-# --- 4. КОМАНДА /HELP ---
+# --- 4. КОМАНДА /HELP (ИСПРАВЛЕНО) ---
 @bot.on.message(text="/help")
 async def help_handler(message: Message):
     if await is_muted(message): return
     if message.peer_id not in ACTIVE_CHATS and not has_access(message.from_id, "Специальный Руководитель"):
         return "Ошибка: беседа не активирована."
 
-    help_msg = "Команды пользователей:\n/info -- Официальные ресурсы\n/stats -- Ваша статистика\n/getid -- Получить ссылку на профиль\n\n"
+    help_msg = "Команды пользователей:\n/info - Официальные ресурсы\n/stats - Ваша статистика\n/getid - Получить ссылку на профиль\n\n"
     
     if has_access(message.from_id, "Модератор"):
-        help_msg += "Команды модераторов:\n/kick -- Исключить пользователя\n/mute -- Выдать блокировку чата\n\n"
+        help_msg += "Команды модераторов:\n/kick - Исключить пользователя\n/mute - Выдать блокировку чата\n\n"
         
     if has_access(message.from_id, "Заместитель Специального Руководителя"):
-        help_msg += "Команды руководства:\n/gstaff -- Список высшего руководства\n/gbanpl -- Выдать глобальный бан\n/gunbanpl -- Снять глобальный бан\n\n"
+        help_msg += "Команды руководства:\n/gstaff - Список высшего руководства\n/gbanpl - Выдать глобальный бан\n/gunbanpl - Снять глобальный бан\n\n"
         
     if has_access(message.from_id, "Специальный Руководитель"):
-        help_msg += "Команды Спец. Руководителя:\n/sync -- Синхронизация беседы"
+        help_msg += "Команды Спец. Руководителя:\n/sync - Синхронизация беседы"
         
     await message.answer(help_msg)
 
@@ -115,27 +116,38 @@ async def mute_handler(message: Message, args=None):
     if args and args.split()[-1].isdigit():
         minutes = int(args.split()[-1])
     MUTE_LIST[target_id] = time.time() + (minutes * 60)
-    mod_nick = USER_DATA.get(message.from_id, ["", "Admin"])[1]
-    await message.answer(f"Администратор [id{message.from_id}|{mod_nick}] выдал блокировку чата [id{target_id}|пользователю] на {minutes} минут.")
+    nick = USER_DATA.get(message.from_id, ["", "Admin"])[1]
+    await message.answer(f"Администратор [id{message.from_id}|{nick}] выдал блокировку чата [id{target_id}|пользователю] на {minutes} минут.")
 
-# --- 7. РУКОВОДСТВО ---
+# --- 7. РУКОВОДСТВО (ФИКС ССЫЛОК) ---
 @bot.on.message(text="/sync")
 async def sync_handler(message: Message):
     if await is_muted(message): return
     if not has_access(message.from_id, "Специальный Руководитель"): return
     ACTIVE_CHATS.add(message.peer_id)
     nick = USER_DATA[message.from_id][1]
-    await message.answer(f"[https://vk.com/id{message.from_id}|{nick}] синхронизировал Беседу с Базой данных!")
+    await message.answer(f"[id{message.from_id}|{nick}] синхронизировал Беседу с Базой данных!")
 
 @bot.on.message(text="/gstaff")
 async def gstaff_handler(message: Message):
     if await is_muted(message): return
     if message.peer_id not in ACTIVE_CHATS: return
     if not has_access(message.from_id, "Заместитель Специального Руководителя"): return
-    spec_boss = "- [https://vk.com/id870757778|Misha Manlix]"
-    deputy_list = [f"- [https://vk.com/id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == "Заместитель Специального Руководителя"]
-    deputy_str = "\n".join(deputy_list[:2]) + ("\n- Отсутствует." * (2 - len(deputy_list)))
-    res = f"MANLIX MANAGER | Команда Бота:\n\n| Специальный Руководитель:\n{spec_boss}\n\n| Основной зам. Спец. Руководителя:\n- Отсутствует.\n\n| Зам. Спец. Руководителя:\n{deputy_str}"
+    
+    spec_boss = "- [id870757778|Misha Manlix]"
+    deputy_list = [f"- [id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == "Заместитель Специального Руководителя"]
+    deputy_str = "\n".join(deputy_list[:2])
+    if not deputy_str: deputy_str = "- Отсутствует.\n- Отсутствует."
+    
+    res = (
+        "MANLIX MANAGER | Команда Бота:\n\n"
+        "| Специальный Руководитель:\n"
+        f"{spec_boss}\n\n"
+        "| Основной зам. Спец. Руководителя:\n"
+        "- Отсутствует.\n\n"
+        "| Зам. Спец. Руководителя:\n"
+        f"{deputy_str}"
+    )
     await message.answer(res)
 
 # --- 8. ОБРАБОТЧИК МУТА ---
@@ -154,3 +166,4 @@ def run_port():
 
 threading.Thread(target=run_port, daemon=True).start()
 bot.run_forever()
+
