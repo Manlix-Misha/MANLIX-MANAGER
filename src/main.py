@@ -43,13 +43,21 @@ async def help_handler(message: Message):
         return "Ошибка: беседа не активирована."
 
     # --- СООБЩЕНИЕ №1 (ОБЩЕЕ) ---
-    help_msg = "Команды пользователей:\n/info\n/stats\n/getid\n/staff\n/ping\n\n"
+    help_msg = (
+        "Команды пользователей:\n"
+        "/info -- Официальные ресурсы\n"
+        "/stats -- Ваша статистика\n"
+        "/getid -- Получить ссылку на профиль\n"
+        "/staff -- Состав администрации беседы\n"
+        "/ping -- Проверка времени отклика\n\n"
+    )
     
     if has_access(message.from_id, "Модератор"):
-        help_msg += "Команды модераторов:\n/kick\n/mute\n\n"
-        
-    if has_access(message.from_id, "Администратор"):
-        help_msg += "Команды администраторов:\n/warn (в разработке)\n/unmute (в разработке)\n\n"
+        help_msg += (
+            "Команды модераторов:\n"
+            "/kick -- Исключить пользователя из беседы\n"
+            "/mute -- Выдать блокировку чата\n\n"
+        )
         
     await message.answer(help_msg)
 
@@ -58,50 +66,24 @@ async def help_handler(message: Message):
         guide_msg = "Команды руководства:\n\n"
         
         # Блок для ЗСР
-        guide_msg += "Команды ЗСР:\n/gstaff\n/gbanpl\n/gunbanpl\n\n"
+        guide_msg += (
+            "Команды ЗСР:\n"
+            "/gstaff -- Список высшего руководства\n"
+            "/gbanpl -- Выдать глобальный бан игроку\n"
+            "/gunbanpl -- Снять глобальный бан игрока\n\n"
+        )
         
-        # Блок для ОЗСР
-        if has_access(message.from_id, "Основной Зам Специального Руководителя"):
-            guide_msg += "Команды ОЗСР:\n/check (в разработке)\n\n"
-            
         # Блок для Спец. Руководителя
         if has_access(message.from_id, "Специальный Руководитель"):
-            guide_msg += "Команды Спец. Руководителя:\n/start\n/sync"
+            guide_msg += (
+                "Команды Спец. Руководителя:\n"
+                "/start -- Активация беседы с уведомлением\n"
+                "/sync -- Синхронизация беседы с базой\n"
+            )
             
         await message.answer(guide_msg)
 
-# --- 5. ОБНОВЛЕННАЯ КОМАНДА /GSTAFF ---
-@bot.on.message(text="/gstaff")
-async def gstaff_handler(message: Message):
-    if message.peer_id not in ACTIVE_CHATS: return
-    if not has_access(message.from_id, "Заместитель Специального Руководителя"): return
-
-    spec_boss = "– [https://vk.com/id870757778|Misha Manlix]"
-    main_deputy = "– Отсутствует."
-    deputy_list = []
-
-    for uid, data in USER_DATA.items():
-        if data[0] == "Основной Зам Специального Руководителя":
-            main_deputy = f"– [https://vk.com/id{uid}|{data[1]}]"
-        elif data[0] == "Заместитель Специального Руководителя":
-            deputy_list.append(f"– [https://vk.com/id{uid}|{data[1]}]")
-
-    deputy_str = ""
-    for i in range(2):
-        deputy_str += (deputy_list[i] if i < len(deputy_list) else "– Отсутствует.") + "\n"
-
-    res = (
-        "MANLIX MANAGER | Команда Бота:\n\n"
-        "| Специальный Руководитель:\n"
-        f"{spec_boss}\n\n"
-        "| Основной зам. Спец. Руководителя:\n"
-        f"{main_deputy}\n\n"
-        "| Зам. Спец. Руководителя:\n"
-        f"{deputy_str.strip()}"
-    )
-    await message.answer(res)
-
-# --- 6. ОСТАЛЬНЫЕ КОМАНДЫ (PING, SYNC, START, MUTE И Т.Д.) ---
+# --- 5. ОСТАЛЬНЫЕ КОМАНДЫ (БЕЗ ИЗМЕНЕНИЙ) ---
 
 @bot.on.message(text="/ping")
 async def ping_handler(message: Message):
@@ -112,44 +94,40 @@ async def ping_handler(message: Message):
 async def sync_handler(message: Message):
     if not has_access(message.from_id, "Специальный Руководитель"): return
     ACTIVE_CHATS.add(message.peer_id)
-    await message.answer(f"[https://vk.com/id{message.from_id}|{USER_DATA[message.from_id][1]}] синхронизировал Беседу с Базой данных!")
-
-@bot.on.message(text="/start")
-async def start_handler(message: Message):
-    if not has_access(message.from_id, "Специальный Руководитель"):
-        return "Вы не можете активировать Беседу, так как не являетесь командой Бота."
-    ACTIVE_CHATS.add(message.peer_id)
-    await message.answer("Проверка прав пройдена успешно. Беседа активирована.")
+    link = f"https://vk.com/id{message.from_id}"
+    nick = USER_DATA[message.from_id][1]
+    await message.answer(f"[{link}|{nick}] синхронизировал Беседу с Базой данных!")
 
 @bot.on.message(text="/staff")
 async def staff_handler(message: Message):
     if message.peer_id not in ACTIVE_CHATS: return
     roles = ["Владелец", "Спец. Администратор", "Зам. Спец. Администратора", "Старший Администратор", "Администратор", "Старший Модератор", "Модератор"]
-    res = "Список администрации беседы:\n\n"
+    res_parts = []
     for r in roles:
-        res += f"{r}: \n"
-        found = False
-        for uid, data in USER_DATA.items():
-            if data[0] == r: res += f"– [id{uid}|{data[1]}]\n"; found = True
-        if not found: res += "– Отсутствует.\n"
-        res += "\n"
-    await message.answer(res)
+        found = [f"– [id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == r]
+        res_parts.append(f"{r}:\n" + ("\n".join(found) if found else "– Отсутствует."))
+    await message.answer("\n\n".join(res_parts))
 
-@bot.on.message(text="/getid")
-async def getid_handler(message: Message):
+@bot.on.message(text="/gstaff")
+async def gstaff_handler(message: Message):
     if message.peer_id not in ACTIVE_CHATS: return
-    target_id = message.reply_message.from_id if message.reply_message else message.from_id
-    await message.answer(f"Оригинальная ссылка на ВК:\nhttps://vk.com/id{target_id}")
+    if not has_access(message.from_id, "Заместитель Специального Руководителя"): return
+    spec_boss = "– [https://vk.com/id870757778|Misha Manlix]"
+    main_deputy = "– Отсутствует."
+    deputy_list = [f"– [https://vk.com/id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == "Заместитель Специального Руководителя"]
+    deputy_str = "\n".join(deputy_list[:2]) + ("\n– Отсутствует." * (2 - len(deputy_list)))
+    res = f"MANLIX MANAGER | Команда Бота:\n\n| Специальный Руководитель:\n{spec_boss}\n\n| Основной зам. Спец. Руководителя:\n{main_deputy}\n\n| Зам. Спец. Руководителя:\n{deputy_str}"
+    await message.answer(res)
 
 @bot.on.message(text="/mute <args>")
 @bot.on.message(text="/mute")
 async def mute_handler(message: Message, args=None):
-    if message.peer_id not in ACTIVE_CHATS: return
-    if not has_access(message.from_id, "Модератор"): return
+    if message.peer_id not in ACTIVE_CHATS or not has_access(message.from_id, "Модератор"): return
     target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
     if not target_id: return
     time_v = args.split()[-1] if args and args.split()[-1].isdigit() else "30"
-    await message.answer(f"[https://vk.com/id{message.from_id}|Модератор {USER_DATA[message.from_id][1]}] выдал Блокировку чата [https://vk.com/id{target_id}|пользователю] на {time_v} минут.")
+    mod_nick = USER_DATA.get(message.from_id, ["", "Admin"])[1]
+    await message.answer(f"[https://vk.com/id{message.from_id}|Модератор {mod_nick}] выдал Блокировку чата [https://vk.com/id{target_id}|пользователю] на {time_v} минут.")
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
