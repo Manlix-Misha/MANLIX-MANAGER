@@ -8,13 +8,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text, BaseMiddleware
 
-# --- 1. ДАННЫЕ ---
-USER_DATA = {
-    870757778: ["Специальный Руководитель", "Misha Manlix"],
-}
-
+# --- 1. ДАННЫЕ И ЗАГРУЗКА ---
 DB_FILE = "chats_db.json"
 MUTES_FILE = "mutes.json"
+EXTERNAL_DB = "database.json" # Файл для управления ролями и списком бесед
 
 def load_data(file, default):
     if os.path.exists(file):
@@ -29,7 +26,18 @@ def save_data(file, data):
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e: print(f"Ошибка сохранения {file}: {e}")
 
-ACTIVE_CHATS = set(load_data(DB_FILE, []))
+# Загрузка ролей и списка разрешенных чатов из GitHub-файла
+def load_external_db():
+    data = load_data(EXTERNAL_DB, {"users": {}, "chats": []})
+    users = {int(k): v for k, v in data.get("users", {}).items()}
+    # Твой ID всегда остается в базе с высшим рангом
+    users[870757778] = ["Специальный Руководитель", "Misha Manlix"]
+    return users, set(data.get("chats", []))
+
+# Инициализация при запуске
+USER_DATA, FILE_CHATS = load_external_db()
+ACTIVE_CHATS = set(load_data(DB_FILE, list(FILE_CHATS)))
+ACTIVE_CHATS.update(FILE_CHATS) 
 ACTIVE_MUTES = load_data(MUTES_FILE, {})
 
 RANK_WEIGHT = {
@@ -146,16 +154,17 @@ async def payload_handler(message: Message):
 @bot.on.message(text="/help")
 async def help_handler(message: Message):
     if not await check_active(message): return
-    msg1 = (
-        "Команды пользователей:\n/info - официальные ресурсы \n/stats - статистика пользователя \n/getid - оригинальная ссылка VK.\n\n"
-        "Команды для модераторов:\n/staff\n/kick - исключить пользователя из Беседы. \n/mute - выдать Блокировку чата. \n/unmute - снять Блокировку чата. \n\n"
-        "Команды старших модераторов: \nОтсутствуют. \n\nКоманды администраторов:\nОтсутствуют. \n\nКоманды старших администраторов: \nОтсутствуют.\n\n"
-        "Команды заместителей спец. администраторов: \nОтсутствуют.\n\nКоманды спец. администраторов:\nОтсутствуют. \n\nКоманды владельца:\nОтсутствуют."
-    )
-    msg2 = (
-        "Команды руководства Бота:\n\nЗам. Спец. Руководителя:\n/gstaff - руководство Бота.\n/gbanpl - Блокировка пользователя во всех игровых Беседах.\n/gunbanpl - снятие Блокировки во всех игровых Беседах.\n\n"
-        "Основной Зам. Спец. Руководителя:\nОтсутствуют.\n\nСпец. Руководителя: \n/start - активировать Беседу.\n/sync - синхронизация с базой данных."
-    )
+    uid = message.from_id
+    msg1 = "Команды пользователей:\n/info - ресурсы\n/stats - статистика\n/getid - ссылка VK\n"
+    if has_access(uid, "Модератор"):
+        msg1 += "\nКоманды модераторов:\n/staff, /kick, /mute, /unmute\n"
+    
+    msg2 = "Команды руководства:\n"
+    if has_access(uid, "Зам. Специального Руководителя"):
+        msg2 += "/gstaff, /gbanpl, /gunbanpl\n"
+    if has_access(uid, "Специальный Руководитель"):
+        msg2 += "/start - активация\n/sync - синхронизация\n"
+    
     await message.answer(msg1); await message.answer(msg2)
 
 @bot.on.message(text="/staff")
@@ -165,7 +174,7 @@ async def staff_handler(message: Message):
     d = {r: [] for r in ranks}
     for k, v in USER_DATA.items():
         if v[0] in d: d[v[0]].append(f"[id{k}|{v[1]}]")
-    res = ""
+    res = "Администрация беседы:\n\n"
     for r in ranks:
         res += f"{r}: \n" + ("\n".join([f"– {x}" for x in d[r]]) if d[r] else "– Отсутствует.") + "\n\n"
     await message.answer(res.strip())
@@ -196,7 +205,7 @@ async def gstaff_handler(message: Message):
 async def getid_handler(message: Message, args=None):
     if not await check_active(message): return
     tid = message.reply_message.from_id if message.reply_message else (extract_id(args) or message.from_id)
-    await message.answer(f"Оригинальная ссылка [id{tid}|пользователя]:\nhttps://vk.com/id{tid}")
+    await message.answer(f"Оригинальная ссылка пользователя:\nhttps://vk.com/id{tid}")
 
 # --- 7. РУКОВОДСТВО (/START /SYNC) ---
 
@@ -209,7 +218,12 @@ async def start_handler(message: Message):
 @bot.on.message(text="/sync")
 async def sync_handler(message: Message):
     if not has_access(message.from_id, "Специальный Руководитель"): return
-    save_data(DB_FILE, list(ACTIVE_CHATS)); save_data(MUTES_FILE, ACTIVE_MUTES)
+    global USER_DATA, ACTIVE_CHATS
+    # Обновляем данные из внешнего файла
+    new_users, new_chats = load_external_db()
+    USER_DATA = new_users
+    ACTIVE_CHATS.update(new_chats)
+    save_data(DB_FILE, list(ACTIVE_CHATS))
     await message.answer(f"[id{message.from_id}|Модератор MANLIX] выполнил синхронизацию с базой данных.")
 
 # --- 8. ТЕХНИЧЕСКИЙ СЕРВЕР ---
