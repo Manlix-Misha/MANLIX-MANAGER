@@ -8,7 +8,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-# --- 1. ДАННЫЕ (НЕ ИЗМЕНЯТЬ НАЧАЛО ДЛЯ RENDER) ---
+# --- 1. ДАННЫЕ (ПЕРЕД НАЧАЛОМ КОДА НЕ ИЗМЕНЯТЬ ДЛЯ RENDER) ---
 USER_DATA = {
     870757778: ["Специальный Руководитель", "Misha Manlix"],
 }
@@ -53,12 +53,17 @@ def extract_id(text):
 # --- 3. ИНИЦИАЛИЗАЦИЯ ---
 bot = Bot(token=os.environ.get("TOKEN"))
 
-# --- 4. КОМАНДА /HELP ---
+# --- 4. ПРОВЕРКА АКТИВАЦИИ ---
+async def check_active(message: Message):
+    if message.peer_id not in ACTIVE_CHATS and message.from_id != 870757778:
+        await message.answer("Владелец беседы не является командой Бота, я не буду здесь работать.")
+        return False
+    return True
+
+# --- 5. КОМАНДА /HELP ---
 @bot.on.message(text=["/help", "/help <args>"])
 async def help_handler(message: Message, args=None):
-    is_sr = has_access(message.from_id, "Специальный Руководитель")
-    if message.peer_id not in ACTIVE_CHATS and not is_sr:
-        return "Ошибка: беседа не активирована."
+    if not await check_active(message): return
 
     msg1 = "Команды пользователей:\n"
     msg1 += "/info -- Официальные ресурсы\n/stats -- Ваша статистика\n/getid -- Получить ссылку на профиль\n/staff -- Список администрации беседы\n/ping -- Проверка времени отклика\n\n"
@@ -73,11 +78,11 @@ async def help_handler(message: Message, args=None):
             msg2 += "Команды Спец. Руководителя:\n/start -- Активация беседы\n/sync -- Синхронизация беседы"
         await message.answer(msg2)
 
-# --- 5. ИНФО-КОМАНДЫ ---
+# --- 6. ИНФО-КОМАНДЫ ---
 
 @bot.on.message(text=["/staff", "/staff <args>"])
 async def staff_handler(message: Message, args=None):
-    if message.peer_id not in ACTIVE_CHATS: return
+    if not await check_active(message): return
     roles = ["Владелец", "Спец. Администратор", "Зам. Спец. Администратора", "Старший Администратор", "Администратор", "Старший Модератор", "Модератор"]
     parts = []
     for r in roles:
@@ -87,34 +92,40 @@ async def staff_handler(message: Message, args=None):
 
 @bot.on.message(text=["/gstaff", "/gstaff <args>"])
 async def gstaff_handler(message: Message, args=None):
-    if message.peer_id not in ACTIVE_CHATS or not has_access(message.from_id, "Заместитель Специального Руководителя"): return
+    if not await check_active(message): return
+    if not has_access(message.from_id, "Заместитель Специального Руководителя"): return
+    
     spec_boss = "– [https://vk.com/id870757778|Misha Manlix]"
     main_deputy = "– Отсутствует."
     deputies = [f"– [https://vk.com/id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == "Заместитель Специального Руководителя"]
     deputy_list = deputies[:2] + ["– Отсутствует."] * (2 - len(deputies[:2]))
+    
     res = (f"MANLIX MANAGER | Команда Бота:\n\n| Специальный Руководитель:\n{spec_boss}\n\n"
            f"| Основной зам. Спец. Руководителя:\n{main_deputy}\n\n"
            f"| Зам. Спец. Руководителя:\n" + "\n".join(deputy_list))
     await message.answer(res)
 
-# --- 6. МОДЕРАЦИЯ ---
+# --- 7. МОДЕРАЦИЯ ---
 
 @bot.on.message(text=["/kick", "/kick <args>"])
 async def kick_handler(message: Message, args=None):
-    if message.peer_id not in ACTIVE_CHATS or not has_access(message.from_id, "Модератор"): return
+    if not await check_active(message): return
+    if not has_access(message.from_id, "Модератор"): return
+    
     target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
     if not target_id: return "Укажите пользователя!"
     
     try:
         await bot.api.messages.remove_chat_user(chat_id=message.peer_id - 2000000000, user_id=target_id)
         mod_nick = USER_DATA.get(message.from_id, ["", "MANLIX"])[1]
-        res = f"[id{message.from_id}|Модератор {mod_nick}] исключил(-а) [id{target_id}|пользователя] из Беседы."
-        await message.answer(res)
+        await message.answer(f"[id{message.from_id}|Модератор {mod_nick}] исключил(-а) [id{target_id}|пользователя] из Беседы.")
     except: await message.answer("Ошибка: не удалось исключить.")
 
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_handler(message: Message, args=None):
-    if message.peer_id not in ACTIVE_CHATS or not has_access(message.from_id, "Модератор"): return
+    if not await check_active(message): return
+    if not has_access(message.from_id, "Модератор"): return
+    
     target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
     if not target_id: return "Укажите пользователя!"
     
@@ -127,8 +138,7 @@ async def mute_handler(message: Message, args=None):
             reason_text = re.sub(r'\d+', '', args).strip()
             if reason_text: reason = reason_text
 
-    until_date = datetime.datetime.now() + datetime.timedelta(minutes=time_minutes)
-    date_str = until_date.strftime("%d/%m/%Y %H:%M:%S")
+    date_str = (datetime.datetime.now() + datetime.timedelta(minutes=time_minutes)).strftime("%d/%m/%Y %H:%M:%S")
     mod_nick = USER_DATA.get(message.from_id, ["", "MANLIX"])[1]
     
     kb = Keyboard(inline=True)
@@ -140,16 +150,14 @@ async def mute_handler(message: Message, args=None):
            f"Мут выдан до: {date_str}")
     await message.answer(res, keyboard=kb)
 
-# --- 7. ОБРАБОТКА КНОПОК И СОБЫТИЙ ---
+# --- 8. ОБРАБОТКА КНОПОК ---
 
 @bot.on.message(func=lambda message: message.payload is not None)
 async def payload_handler(message: Message):
-    payload = message.payload
-    if isinstance(payload, str): payload = json.loads(payload)
+    payload = json.loads(message.payload) if isinstance(message.payload, str) else message.payload
     if not has_access(message.from_id, "Модератор"): return
 
-    cmd = payload.get("cmd")
-    target = payload.get("target")
+    cmd, target = payload.get("cmd"), payload.get("target")
 
     if cmd == "unmute":
         await message.answer(f"Модератор [id{message.from_id}|{USER_DATA.get(message.from_id, ['', 'Admin'])[1]}] досрочно снял мут с [id{target}|пользователя].")
@@ -161,36 +169,28 @@ async def payload_handler(message: Message):
             await message.answer(f"Пользователь [id{target}|ID {target}] был окончательно исключен.")
         except: pass
 
-@bot.on.message()
-async def exit_handler(message: Message):
-    if not message.action or message.peer_id not in ACTIVE_CHATS: return
-    if "chat_kick_user" in str(message.action.type):
-        mid = message.action.member_id
-        if mid == message.from_id:
-            kb = Keyboard(inline=True).add(Text("Исключить", payload={"cmd": "kick_btn", "target": mid}), color=KeyboardButtonColor.NEGATIVE)
-            await message.answer(f"[id{mid}|Пользователь] покинул(а) Беседу.", keyboard=kb)
-
-# --- 8. УПРАВЛЕНИЕ ---
+# --- 9. УПРАВЛЕНИЕ ---
 
 @bot.on.message(text=["/sync", "/sync <args>", "/start", "/start <args>"])
 async def activation(message: Message, args=None):
-    if not has_access(message.from_id, "Специальный Руководитель"): return
+    if message.from_id != 870757778: return
     ACTIVE_CHATS.add(message.peer_id)
     save_chats()
-    await message.answer(f"Беседа синхронизирована!")
+    await message.answer("Беседа успешно синхронизирована!")
 
 @bot.on.message(text=["/stats", "/stats <args>"])
 async def stats(message: Message, args=None):
-    if message.peer_id not in ACTIVE_CHATS: return
+    if not await check_active(message): return
     tid = message.reply_message.from_id if message.reply_message else message.from_id
     await message.answer(f"Статистика пользователя:\nID: {tid}\nРоль: {get_rank(tid)}")
 
 @bot.on.message(text=["/ping", "/ping <args>"])
 async def ping(message: Message, args=None):
+    if not await check_active(message): return
     delta = time.time() - (message.date or time.time())
     await message.answer(f"ПОНГ!\nВремя обработки - {round(abs(delta), 2)} сек.")
 
-# --- 9. СЕРВЕР ---
+# --- 10. СЕРВЕР ---
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
