@@ -14,8 +14,8 @@ from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType, BaseMi
 # --- 1. НАСТРОЙКИ ---
 GH_TOKEN = os.environ.get("GH_TOKEN")
 GH_REPO = os.environ.get("GH_REPO") 
-GH_PATH_DB = "database.json"
-GH_PATH_ECO = "economy.json"
+GH_PATH_DB = "database.json"      # Системный файл
+GH_PATH_ECO = "economy.json"     # Игровой файл
 EXTERNAL_DB = "database.json"
 EXTERNAL_ECO = "economy.json"
 
@@ -88,7 +88,9 @@ def get_user_data(peer_id, user_id):
 def get_eco_data(user_id):
     uid = str(user_id)
     if uid not in ECONOMY:
-        ECONOMY[uid] = {"balance": 0, "last_prise": 0}
+        ECONOMY[uid] = {"balance": 0, "bank": 0, "last_prise": 0}
+    if "bank" not in ECONOMY[uid]:
+        ECONOMY[uid]["bank"] = 0
     return ECONOMY[uid]
 
 async def get_nick(peer_id, user_id):
@@ -131,15 +133,17 @@ class MuteMiddleware(BaseMiddleware[Message]):
 
 bot.labeler.message_view.register_middleware(MuteMiddleware)
 
-# --- 4. ИГРОВЫЕ КОМАНДЫ ---
+# --- 4. ИГРОВАЯ СИСТЕМА ---
 
 @bot.on.message(text="/ghelp")
 async def ghelp_cmd(m: Message):
     if not await check_active(m): return
     msg = ("🎮 Игровые команды MANLIX:\n\n"
-           "/prise — получить ежечасный приз ($100-$1000)\n"
-           "/balance — проверить свой баланс\n"
-           "/bank — информация о личном счете")
+           "🎉 /prise — Получить ежечасный приз\n"
+           "💰 /balance — Наличные средства\n"
+           "🏦 /bank — Состояние счетов\n"
+           "📥 /положить [сумма] — Положить наличные в банк\n"
+           "💸 /перевести [ссылка] [сумма] — Перевод с банковского счета")
     await m.answer(msg)
 
 @bot.on.message(text="/prise")
@@ -158,19 +162,83 @@ async def prise_cmd(m: Message):
     data["balance"] += win
     data["last_prise"] = now
     ECO_CHANGED = True
-    await m.answer(f"🎁 Вы получили приз: ${win}!\n💰 Текущий баланс: ${data['balance']}")
+    await m.answer(f"🎉 Вы получили приз: {win}$\n💰 Наличные: {data['balance']}$")
 
 @bot.on.message(text="/balance")
 async def balance_cmd(m: Message):
     if not await check_active(m): return
     data = get_eco_data(m.from_id)
-    await m.answer(f"💰 Ваш баланс: ${data['balance']}")
+    await m.answer(f"💰 Ваш баланс (наличные): {data['balance']}$")
 
 @bot.on.message(text="/bank")
 async def bank_cmd(m: Message):
     if not await check_active(m): return
     data = get_eco_data(m.from_id)
-    await m.answer(f"🏦 Личный счет в MANLIX BANK:\n💵 Баланс: ${data['balance']}")
+    msg = (f"🏦 …::: MANLIX BANK :::…\n\n"
+           f"💵 Наличные: {data['balance']}$\n"
+           f"💳 На счету: {data['bank']}$")
+    await m.answer(msg)
+
+@bot.on.message(text=["/положить", "/положить <amount:int>"])
+async def deposit_cmd(m: Message, amount: int = None):
+    if not await check_active(m): return
+    if amount is None or amount <= 0:
+        return await m.answer("⚠ Укажите сумму: /положить [число]")
+    
+    global ECO_CHANGED
+    user = get_eco_data(m.from_id)
+    if user["balance"] < amount:
+        return await m.answer("⚠ У вас недостаточно наличных!")
+    
+    user["balance"] -= amount
+    user["bank"] += amount
+    ECO_CHANGED = True
+    await m.answer(f"💲 Вы положили на свой счет: {amount}$")
+
+@bot.on.message(text=["/перевести", "/перевести <args>"])
+async def transfer_cmd(m: Message, args=None):
+    if not await check_active(m): return
+    if not args: return await m.answer("⚠ Пример: /перевести [ссылка] [сумма]")
+    
+    parts = args.split()
+    if len(parts) < 2: return await m.answer("⚠ Укажите пользователя и сумму.")
+    
+    target_id = extract_id(parts[0])
+    try:
+        amount = int(parts[1])
+    except:
+        return await m.answer("⚠ Сумма должна быть числом.")
+    
+    if amount <= 0: return await m.answer("⚠ Неверная сумма.")
+    if target_id == m.from_id: return await m.answer("⚠ Нельзя переводить самому себе.")
+
+    global ECO_CHANGED
+    sender = get_eco_data(m.from_id)
+    if sender["bank"] < amount:
+        return await m.answer("⚠ На вашем банковском счету недостаточно средств!")
+    
+    receiver = get_eco_data(target_id)
+    sender["bank"] -= amount
+    receiver["bank"] += amount
+    ECO_CHANGED = True
+    
+    target_nick = await get_nick(m.peer_id, target_id)
+    await m.answer(f"💸 Вы перевели [id{target_id}|{target_nick}] {amount}$")
+
+@bot.on.message(text=["/setbal", "/setbal <args>"])
+async def setbal_cmd(m: Message, args=None):
+    if int(m.from_id) != 870757778: return
+    if not args: return
+    parts = args.split()
+    target = extract_id(parts[0])
+    try:
+        amount = int(parts[1])
+        global ECO_CHANGED
+        data = get_eco_data(target)
+        data["balance"] = amount
+        ECO_CHANGED = True
+        await m.answer(f"✅ Баланс [id{target}] установлен на {amount}$")
+    except: pass
 
 # --- 5. СОБЫТИЯ БЕСЕДЫ ---
 
@@ -229,8 +297,8 @@ async def stats_cmd(m: Message, args=None):
     target = m.reply_message.from_id if m.reply_message else (extract_id(args) or m.from_id)
     rank = get_user_data(m.peer_id, target)[0]
     nick = await get_nick(m.peer_id, target)
-    balance = get_eco_data(target)["balance"]
-    await m.answer(f"Статистика [id{target}|пользователя]:\nНик: {nick}\nУровень прав: {rank}\nБаланс: ${balance}")
+    eco = get_eco_data(target)
+    await m.answer(f"Статистика [id{target}|пользователя]:\nНик: {nick}\nУровень прав: {rank}\nНаличные: {eco['balance']}$\nВ банке: {eco['bank']}$")
 
 @bot.on.message(text="/gstaff")
 async def gstaff_cmd(m: Message):
@@ -408,17 +476,23 @@ async def start_handler(m: Message):
 @bot.on.message(text="/sync")
 async def sync_cmd(m: Message):
     if int(m.from_id) != 870757778: return
-    # Синхронизация системной базы
-    url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH_DB}"
+    headers = {"Authorization": f"token {GH_TOKEN}"}
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers={"Authorization": f"token {GH_TOKEN}"}) as resp:
+        async with session.get(f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH_DB}", headers=headers) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 global DATABASE
                 DATABASE = json.loads(base64.b64decode(data['content']).decode('utf-8'))
                 with open(EXTERNAL_DB, "w", encoding="utf-8") as f:
                     json.dump(DATABASE, f, ensure_ascii=False, indent=4)
-                await m.answer("Синхронизация завершена.")
+        async with session.get(f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH_ECO}", headers=headers) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                global ECONOMY
+                ECONOMY = json.loads(base64.b64decode(data['content']).decode('utf-8'))
+                with open(EXTERNAL_ECO, "w", encoding="utf-8") as f:
+                    json.dump(ECONOMY, f, ensure_ascii=False, indent=4)
+    await m.answer("Синхронизация завершена.")
 
 @bot.on.message(text="/chatid")
 async def chatid_cmd(m: Message):
@@ -440,7 +514,6 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     threading.Thread(target=lambda: HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever(), daemon=True).start()
-    
     loop = asyncio.get_event_loop()
-    loop.create_task(auto_save_eco()) # Запуск фонового сохранения денег
+    loop.create_task(auto_save_eco())
     bot.run_forever()
