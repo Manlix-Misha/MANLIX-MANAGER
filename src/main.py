@@ -8,34 +8,31 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-# --- 1. ДАННЫЕ (НЕ ИЗМЕНЯТЬ НАЧАЛО ДЛЯ RENDER) ---
+# --- 1. ДАННЫЕ ---
 USER_DATA = {
     870757778: ["Специальный Руководитель", "Misha Manlix"],
 }
 
 DB_FILE = "chats_db.json"
+MUTES_FILE = "mutes.json" # Файл для хранения активных мутов
 
-def load_chats():
-    if os.path.exists(DB_FILE):
+def load_data(file, default):
+    if os.path.exists(file):
         try:
-            with open(DB_FILE, "r") as f:
-                return set(json.load(f))
-        except: return set()
-    return set()
+            with open(file, "r") as f: return json.load(f)
+        except: return default
+    return default
 
-def save_chats():
+def save_data(file, data):
     try:
-        with open(DB_FILE, "w") as f:
-            json.dump(list(ACTIVE_CHATS), f)
+        with open(file, "w") as f: json.dump(data, f)
     except: pass
 
-ACTIVE_CHATS = load_chats()
+ACTIVE_CHATS = set(load_data(DB_FILE, []))
+ACTIVE_MUTES = load_data(MUTES_FILE, {}) # { "user_id": "timestamp_end" }
 
 RANK_WEIGHT = {
-    "Пользователь": 0, "Модератор": 1, "Старший Модератор": 2, 
-    "Администратор": 3, "Старший Администратор": 4, "Зам. Спец. Администратора": 5,
-    "Спец. Администратор": 6, "Владелец": 7, "Заместитель Специального Руководителя": 8,
-    "Основной Зам Специального Руководителя": 9, "Специальный Руководитель": 10
+    "Пользователь": 0, "Модератор": 1, "Зам. Специального Руководителя": 8, "Специальный Руководитель": 10
 }
 
 # --- 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
@@ -47,14 +44,14 @@ def has_access(user_id, required_rank):
 
 def extract_id(text):
     if not text: return None
-    # Ищем id в ссылках или упоминаниях
     match = re.search(r'id(\d+)', str(text))
-    return int(match.group(1)) if match else None
+    if match: return int(match.group(1))
+    match_mention = re.search(r'\[id(\d+)\|.*?\]', str(text))
+    if match_mention: return int(match_mention.group(1))
+    return None
 
 async def check_active(message: Message):
-    # Прямой доступ для создателя, чтобы команды работали всегда
-    if message.from_id == 870757778:
-        return True
+    if message.from_id == 870757778: return True
     if message.peer_id not in ACTIVE_CHATS:
         await message.answer("Владелец беседы не является командой Бота, я не буду здесь работать.")
         return False
@@ -63,137 +60,110 @@ async def check_active(message: Message):
 # --- 3. ИНИЦИАЛИЗАЦИЯ ---
 bot = Bot(token=os.environ.get("TOKEN"))
 
-# --- 4. КОМАНДЫ МОДЕРАЦИИ ---
+# --- 4. УДАЛЕНИЕ СООБЩЕНИЙ ТЕХ КТО В МУТЕ ---
+@bot.on.message()
+async def mute_checker(message: Message):
+    uid = str(message.from_id)
+    if uid in ACTIVE_MUTES:
+        end_time = ACTIVE_MUTES[uid]
+        if time.time() < end_time:
+            try:
+                await bot.api.messages.delete(
+                    cmids=[message.conversation_message_id],
+                    peer_id=message.peer_id,
+                    delete_for_all=True
+                )
+            except: pass
+            return
+        else:
+            del ACTIVE_MUTES[uid]
+            save_data(MUTES_FILE, ACTIVE_MUTES)
+
+# --- 5. КОМАНДЫ МОДЕРАЦИИ ---
 
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_handler(message: Message, args=None):
-    if not await check_active(message): return
-    if not has_access(message.from_id, "Модератор"): return
+    if not await check_active(message) or not has_access(message.from_id, "Модератор"): return
     
-    target_id = None
-    time_minutes = 30
+    target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
+    if not target_id: return "Укажите пользователя!"
+
+    time_min = 30
     reason = "Не указана"
+    if args:
+        digits = re.findall(r'\d+', args)
+        if digits: time_min = int(digits[-1]) # Берем последнее число как время
+        # Убираем ID и время из строки, чтобы найти причину
+        clean_reason = re.sub(r'\[id\d+\|.*?\]|id\d+|\d+', '', args).strip()
+        if clean_reason: reason = clean_reason
 
-    # Логика разбора аргументов
-    if message.reply_message:
-        target_id = message.reply_message.from_id
-        if args:
-            parts = args.split(maxsplit=1)
-            if parts[0].isdigit():
-                time_minutes = int(parts[0])
-                if len(parts) > 1: reason = parts[1]
-            else:
-                reason = args
-    elif args:
-        parts = args.split()
-        target_id = extract_id(parts[0])
-        if len(parts) > 1:
-            if parts[1].isdigit():
-                time_minutes = int(parts[1])
-                reason = " ".join(parts[2:]) if len(parts) > 2 else "Не указана"
-            else:
-                reason = " ".join(parts[1:])
-
-    if not target_id: 
-        return "Укажите пользователя (ссылкой, упоминанием или ответом)!"
+    # МСК Время
+    end_ts = time.time() + (time_min * 60)
+    ACTIVE_MUTES[str(target_id)] = end_ts
+    save_data(MUTES_FILE, ACTIVE_MUTES)
     
-    # Московское время (UTC+3)
-    tz_moscow = datetime.timezone(datetime.timedelta(hours=3))
-    now = datetime.datetime.now(tz_moscow)
-    until_date = now + datetime.timedelta(minutes=time_minutes)
-    date_str = until_date.strftime("%d/%m/%Y %H:%M:%S")
+    date_str = datetime.datetime.fromtimestamp(end_ts + 3*3600).strftime("%d/%m/%Y %H:%M:%S")
     
     kb = Keyboard(inline=True)
     kb.add(Text("Снять мут", payload={"cmd": "unmute", "target": target_id}), color=KeyboardButtonColor.POSITIVE)
-    kb.add(Text("Очистить", payload={"cmd": "clear_msgs", "target": target_id}), color=KeyboardButtonColor.NEGATIVE)
+    kb.add(Text("Очистить", payload={"cmd": "clear", "target": target_id}), color=KeyboardButtonColor.NEGATIVE)
 
-    res = (f"[id{message.from_id}|Модератор MANLIX] замутил(-а) [id{target_id}|пользователя]\n"
-           f"Причина: {reason}\n"
-           f"Мут выдан до: {date_str}")
-    await message.answer(res, keyboard=kb)
+    await message.answer(f"[id{message.from_id}|Модератор MANLIX] замутил(-а) [id{target_id}|пользователя]\nПричина: {reason}\nМут выдан до: {date_str}", keyboard=kb)
 
-@bot.on.message(text=["/kick", "/kick <args>"])
-async def kick_handler(message: Message, args=None):
-    if not await check_active(message): return
-    if not has_access(message.from_id, "Модератор"): return
+@bot.on.message(text=["/unmute", "/unmute <args>"])
+async def unmute_cmd(message: Message, args=None):
+    if not await check_active(message) or not has_access(message.from_id, "Модератор"): return
     target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
-    if not target_id: return "Укажите пользователя!"
-    try:
-        await bot.api.messages.remove_chat_user(chat_id=message.peer_id - 2000000000, user_id=target_id)
-        await message.answer(f"[id{message.from_id}|Модератор MANLIX] исключил(-а) [id{target_id}|пользователя] из Беседы.")
-    except: await message.answer("Ошибка: не удалось исключить.")
+    if str(target_id) in ACTIVE_MUTES:
+        del ACTIVE_MUTES[str(target_id)]
+        save_data(MUTES_FILE, ACTIVE_MUTES)
+        await message.answer(f"[id{message.from_id}|Модератор MANLIX] снял(-а) мут [id{target_id}|пользователю]")
 
-# --- 5. ОБРАБОТКА КНОПОК ---
-
-@bot.on.message(func=lambda message: message.payload is not None)
-async def payload_handler(message: Message):
-    payload = message.payload
-    if isinstance(payload, str): payload = json.loads(payload)
-    if not has_access(message.from_id, "Модератор"): return
-
-    if payload.get("cmd") == "unmute":
-        target = payload.get("target")
-        new_text = f"[id{message.from_id}|Модератор MANLIX] снял(-а) мут [id{target}|пользователю]"
-        await bot.api.messages.edit(
-            peer_id=message.peer_id,
-            conversation_message_id=message.conversation_message_id,
-            message=new_text
-        )
-
-# --- 6. КОМАНДЫ ДОСТУПА И СТАТИСТИКИ ---
-
-@bot.on.message(text=["/sync", "/start"])
-async def sync_handler(message: Message):
-    if message.from_id != 870757778: return
-    ACTIVE_CHATS.add(message.peer_id)
-    save_chats()
-    await message.answer(f"[id870757778|Misha Manlix] синхронизировал Беседу с Базой данных!")
+# --- 6. HELP И ДРУГИЕ КОМАНДЫ ---
 
 @bot.on.message(text="/help")
 async def help_handler(message: Message):
     if not await check_active(message): return
-    res = "Команды пользователей:\n/info, /stats, /getid, /staff, /ping\n\n"
-    if has_access(message.from_id, "Модератор"):
-        res += "Команды модерации:\n/kick, /mute"
-    await message.answer(res)
+    
+    msg1 = ("Пользователь:\n/info - официальные ресурсы.\n/stats - статистика.\n/getid - узнать оригинальный ID пользователя.\n\n"
+            "Модератор:\n/kick - исключить пользователя из Беседы.\n/mute - выдать Блокировку чата.\n/unmute - снять Блокировку чата.\n\n"
+            "Старший Модератор:\nОтсутствуют.\n\nАдминистратор:\nОтсутствуют.\n\nСтарший Администратор:\nОтсутствуют.\n\n"
+            "Зам. Спец. Администратора:\nОтсутствуют.\n\nСпец. Администратор:\nОтсутствуют.\n\nВладелец:\nОтсутствуют.")
+    await message.answer(msg1)
 
-@bot.on.message(text="/stats")
-async def stats_handler(message: Message):
-    # Убрана проверка check_active для этой команды, чтобы ты всегда видел свой статус
-    tid = message.reply_message.from_id if message.reply_message else message.from_id
-    role = get_rank(tid)
-    status = "Синхронизировано" if message.peer_id in ACTIVE_CHATS else "Не синхронизировано"
-    await message.answer(f"Статистика [id{tid}|пользователя]:\nРоль: {role}\nБеседа: {status}")
+    if has_access(message.from_id, "Зам. Специального Руководителя"):
+        msg2 = ("Зам. Специального Руководителя:\n/gstaff - руководство Бота.\n/gbanpl - Блокировка пользователя во всех игровых Беседах.\n/gunbanpl - Снятие Блокировки во всех игровых Беседах.\n\n"
+                "Основной зам. Специального Руководителя:\nОтсутствуют.\n\n"
+                "Специальный Руководитель:\n/sync.")
+        await message.answer(msg2)
 
-@bot.on.message(text="/gstaff")
-async def gstaff_handler(message: Message):
-    if not await check_active(message): return
-    res = ("MANLIX MANAGER | Команда Бота:\n\n"
-           "| Специальный Руководитель:\n– [id870757778|Misha Manlix]\n\n"
-           "| Основной зам. Спец. Руководителя:\n– Отсутствует.\n\n"
-           "| Зам. Спец. Руководителя:\n– Отсутствует.\n– Отсутствует.")
-    await message.answer(res)
+@bot.on.message(text="/getid")
+async def getid_handler(message: Message):
+    target_id = message.reply_message.from_id if message.reply_message else message.from_id
+    await message.answer(f"Оригинальный ID пользователя: {target_id}")
 
-@bot.on.message(text="/staff")
-async def staff_handler(message: Message):
-    if not await check_active(message): return
-    roles = ["Владелец", "Спец. Администратор", "Зам. Спец. Администратора", "Старший Администратор", "Администратор", "Старший Модератор", "Модератор"]
-    parts = ["Список администрации беседы:"]
-    for r in roles:
-        found = [f"– [id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == r]
-        parts.append(f"{r}:\n" + ("\n".join(found) if found else "– Отсутствует."))
-    await message.answer("\n\n".join(parts))
+@bot.on.message(text="/sync")
+async def sync_handler(message: Message):
+    if message.from_id != 870757778: return
+    ACTIVE_CHATS.add(message.peer_id)
+    save_data(DB_FILE, list(ACTIVE_CHATS))
+    await message.answer(f"[id870757778|Misha Manlix] синхронизировал Беседу с Базой данных!")
 
-@bot.on.message(text="/ping")
-async def ping_handler(message: Message):
-    if not await check_active(message): return
-    t = time.time() - (message.date or time.time())
-    await message.answer(f"ПОНГ! Задержка: {round(abs(t), 2)} сек.")
+# --- 7. ОБРАБОТКА PAYLOAD КНОПОК ---
+@bot.on.message(func=lambda message: message.payload is not None)
+async def payload_handler(message: Message):
+    pl = json.loads(message.payload)
+    if not has_access(message.from_id, "Модератор"): return
 
-# --- 7. СЕРВЕР ---
+    if pl.get("cmd") == "unmute":
+        tid = str(pl.get("target"))
+        if tid in ACTIVE_MUTES: del ACTIVE_MUTES[tid]
+        save_data(MUTES_FILE, ACTIVE_MUTES)
+        await bot.api.messages.edit(peer_id=message.peer_id, conversation_message_id=message.conversation_message_id, 
+                                    message=f"[id{message.from_id}|Модератор MANLIX] снял(-а) мут [id{tid}|пользователю]")
+
+# --- СЕРВЕР ---
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
-
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 threading.Thread(target=lambda: HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), Handler).serve_forever(), daemon=True).start()
 bot.run_forever()
