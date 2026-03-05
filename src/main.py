@@ -82,7 +82,6 @@ class MuteMiddleware(BaseMiddleware):
                 del ACTIVE_MUTES[uid_str]
                 save_data(MUTES_FILE, ACTIVE_MUTES)
 
-# Исправлено: передаем класс без скобок, чтобы избежать TypeError
 bot.labeler.message_view.middlewares.append(MuteMiddleware)
 
 # --- 4. КОМАНДЫ МОДЕРАЦИИ ---
@@ -148,16 +147,38 @@ async def payload_handler(message: Message):
 async def help_handler(message: Message):
     if not await check_active(message): return
     msg1 = (
-        "Команды для пользователей:\n/info - официальные ресурсы \n/stats - статистика пользователя \n/getid - оригинальная ссылка VK.\n\n"
-        "Команды для модераторов:\n/kick - исключить пользователя из Беседы. \n/mute - выдать Блокировку чата. \n/unmute - снять Блокировку чата. \n\n"
+        "Команды пользователей:\n/info - официальные ресурсы \n/stats - статистика пользователя \n/getid - оригинальная ссылка VK.\n\n"
+        "Команды для модераторов:\n/staff\n/kick - исключить пользователя из Беседы. \n/mute - выдать Блокировку чата. \n/unmute - снять Блокировку чата. \n\n"
         "Команды старших модераторов: \nОтсутствуют. \n\nКоманды администраторов:\nОтсутствуют. \n\nКоманды старших администраторов: \nОтсутствуют.\n\n"
         "Команды заместителей спец. администраторов: \nОтсутствуют.\n\nКоманды спец. администраторов:\nОтсутствуют. \n\nКоманды владельца:\nОтсутствуют."
     )
     msg2 = (
-        "Команд руководства Бота:\n\nЗам. Спец. Руководителя:\n/gstaff - руководство Бота.\n/gbanpl - Блокировка пользователя во всех игровых Беседах.\n/gunbanpl - снятие Блокировки во всех игровых Беседах.\n\n"
+        "Команды руководства Бота:\n\nЗам. Спец. Руководителя:\n/gstaff - руководство Бота.\n/gbanpl - Блокировка пользователя во всех игровых Беседах.\n/gunbanpl - снятие Блокировки во всех игровых Беседах.\n\n"
         "Основной Зам. Спец. Руководителя:\nОтсутствуют.\n\nСпец. Руководителя: \n/start - активировать Беседу.\n/sync - синхронизация с базой данных."
     )
     await message.answer(msg1); await message.answer(msg2)
+
+@bot.on.message(text="/staff")
+async def staff_handler(message: Message):
+    if not await check_active(message) or not has_access(message.from_id, "Модератор"): return
+    ranks = ["Владелец", "Спец. Администратор", "Зам. Спец. Администратора", "Старший Администратор", "Администратор", "Старший Модератор", "Модератор"]
+    d = {r: [] for r in ranks}
+    for k, v in USER_DATA.items():
+        if v[0] in d: d[v[0]].append(f"[id{k}|{v[1]}]")
+    res = "Состав модерации:\n\n"
+    for r in ranks: res += f"{r}: \n" + ("\n".join([f"– {x}" for x in d[r]]) if d[r] else "– Отсутствует.") + "\n\n"
+    await message.answer(res.strip())
+
+@bot.on.message(text="/gstaff")
+async def gstaff_handler(message: Message):
+    if not await check_active(message) or not has_access(message.from_id, "Зам. Специального Руководителя"): return
+    cats = ["Специальный Руководитель", "Основной зам. Специального Руководителя", "Зам. Специального Руководителя"]
+    d = {c: [] for c in cats}
+    for k, v in USER_DATA.items():
+        if v[0] in d: d[v[0]].append(f"[id{k}|{v[1]}]")
+    res = "MANLIX MANAGER | Команда Бота:\n\n"
+    for c in cats: res += f"| {c}:\n" + ("\n".join([f"– {x}" for x in d[c]]) if d[c] else "– Отсутствует.") + "\n\n"
+    await message.answer(res.strip())
 
 @bot.on.message(text=["/getid", "/getid <args>"])
 async def getid_handler(message: Message, args=None):
