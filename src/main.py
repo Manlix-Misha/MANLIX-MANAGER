@@ -31,7 +31,7 @@ def save_data(file, data):
         print(f"Ошибка сохранения {file}: {e}")
 
 ACTIVE_CHATS = set(load_data(DB_FILE, []))
-ACTIVE_MUTES = load_data(MUTES_FILE, {}) # { "user_id": timestamp_end }
+ACTIVE_MUTES = load_data(MUTES_FILE, {})
 
 RANK_WEIGHT = {
     "Пользователь": 0, "Модератор": 1, "Старший Модератор": 2, 
@@ -66,7 +66,7 @@ async def check_active(message: Message):
 # --- 3. ИНИЦИАЛИЗАЦИЯ И МИДЛВАР ---
 bot = Bot(token=os.environ.get("TOKEN"))
 
-class MuteMiddleware(BaseMiddleware[Message]):
+class MuteMiddleware(BaseMiddleware):
     async def pre(self):
         if self.event.from_id is None: return
         uid_str = str(self.event.from_id)
@@ -79,15 +79,16 @@ class MuteMiddleware(BaseMiddleware[Message]):
                         delete_for_all=True
                     )
                 except Exception as e:
-                    print(f"Не удалось удалить сообщение мута: {e}")
+                    print(f"Ошибка удаления сообщения: {e}")
                 self.stop("User is muted")
             else:
                 del ACTIVE_MUTES[uid_str]
                 save_data(MUTES_FILE, ACTIVE_MUTES)
 
-bot.labeler.message_view.middlewares.append(MuteMiddleware())
+# Регистрация класса без создания экземпляра для предотвращения TypeError
+bot.labeler.message_view.middlewares.append(MuteMiddleware)
 
-# --- 4. КОМАНДЫ ---
+# --- 4. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ ---
 
 @bot.on.message(text="/help")
 async def help_handler(message: Message):
@@ -123,6 +124,8 @@ async def stats_handler(message: Message):
     status = "Синхронизировано" if message.peer_id in ACTIVE_CHATS else "Нет связи"
     await message.answer(f"Профиль [id{tid}|пользователя]:\nРоль: {get_rank(tid)}\nЧат: {status}")
 
+# --- 5. КОМАНДЫ РУКОВОДСТВА ---
+
 @bot.on.message(text="/sync")
 async def sync_handler(message: Message):
     if int(message.from_id) != 870757778: return
@@ -139,6 +142,8 @@ async def gstaff_handler(message: Message):
         staff_list += f"- {data[0]}: [id{uid}|{data[1]}]\n"
     
     await message.answer(staff_list)
+
+# --- 6. КОМАНДЫ МОДЕРАЦИИ ---
 
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_handler(message: Message, args=None):
@@ -194,6 +199,8 @@ async def kick_handler(message: Message, args=None):
         await message.answer(f"Пользователь [id{target_id}|исключен] из беседы.")
     except Exception as e:
         await message.answer(f"Ошибка исключения: {e}")
+
+# --- 7. ОБРАБОТЧИК КНОПОК ---
 
 @bot.on.message(func=lambda message: getattr(message, "payload", None) is not None)
 async def payload_handler(message: Message):
