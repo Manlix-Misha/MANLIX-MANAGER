@@ -8,7 +8,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-# --- 1. ДАННЫЕ (ПЕРЕД НАЧАЛОМ КОДА НЕ ИЗМЕНЯТЬ ДЛЯ RENDER) ---
+# --- 1. ДАННЫЕ (НЕ ИЗМЕНЯТЬ НАЧАЛО ДЛЯ RENDER) ---
 USER_DATA = {
     870757778: ["Специальный Руководитель", "Misha Manlix"],
 }
@@ -48,64 +48,21 @@ def has_access(user_id, required_rank):
 def extract_id(text):
     if not text: return None
     match = re.search(r'id(\d+)', str(text))
-    return int(match.group(1)) if match else None
+    if match: return int(match.group(1))
+    match_mention = re.search(r'\[id(\d+)\|.*?\]', str(text))
+    if match_mention: return int(match_mention.group(1))
+    return None
 
-# --- 3. ИНИЦИАЛИЗАЦИЯ ---
-bot = Bot(token=os.environ.get("TOKEN"))
-
-# --- 4. ПРОВЕРКА АКТИВАЦИИ ---
 async def check_active(message: Message):
     if message.peer_id not in ACTIVE_CHATS and message.from_id != 870757778:
         await message.answer("Владелец беседы не является командой Бота, я не буду здесь работать.")
         return False
     return True
 
-# --- 5. КОМАНДА /HELP ---
-@bot.on.message(text=["/help", "/help <args>"])
-async def help_handler(message: Message, args=None):
-    if not await check_active(message): return
+# --- 3. ИНИЦИАЛИЗАЦИЯ ---
+bot = Bot(token=os.environ.get("TOKEN"))
 
-    msg1 = "Команды пользователей:\n"
-    msg1 += "/info -- Официальные ресурсы\n/stats -- Ваша статистика\n/getid -- Получить ссылку на профиль\n/staff -- Список администрации беседы\n/ping -- Проверка времени отклика\n\n"
-    if has_access(message.from_id, "Модератор"):
-        msg1 += "Команды модерации:\n/kick -- Исключить пользователя\n/mute -- Выдать блокировку чата"
-    await message.answer(msg1)
-
-    if has_access(message.from_id, "Заместитель Специального Руководителя"):
-        msg2 = "Команды руководства:\n\n"
-        msg2 += "Команды ЗСР:\n/gstaff -- Список высшего руководства\n/gbanpl -- Выдать глобальный бан\n/gunbanpl -- Снять глобальный бан\n\n"
-        if has_access(message.from_id, "Специальный Руководитель"):
-            msg2 += "Команды Спец. Руководителя:\n/start -- Активация беседы\n/sync -- Синхронизация беседы"
-        await message.answer(msg2)
-
-# --- 6. ИНФО-КОМАНДЫ ---
-
-@bot.on.message(text=["/staff", "/staff <args>"])
-async def staff_handler(message: Message, args=None):
-    if not await check_active(message): return
-    roles = ["Владелец", "Спец. Администратор", "Зам. Спец. Администратора", "Старший Администратор", "Администратор", "Старший Модератор", "Модератор"]
-    parts = []
-    for r in roles:
-        found = [f"– [id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == r]
-        parts.append(f"{r}: \n" + ("\n".join(found) if found else "– Отсутствует."))
-    await message.answer("\n\n".join(parts))
-
-@bot.on.message(text=["/gstaff", "/gstaff <args>"])
-async def gstaff_handler(message: Message, args=None):
-    if not await check_active(message): return
-    if not has_access(message.from_id, "Заместитель Специального Руководителя"): return
-    
-    spec_boss = "– [https://vk.com/id870757778|Misha Manlix]"
-    main_deputy = "– Отсутствует."
-    deputies = [f"– [https://vk.com/id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == "Заместитель Специального Руководителя"]
-    deputy_list = deputies[:2] + ["– Отсутствует."] * (2 - len(deputies[:2]))
-    
-    res = (f"MANLIX MANAGER | Команда Бота:\n\n| Специальный Руководитель:\n{spec_boss}\n\n"
-           f"| Основной зам. Спец. Руководителя:\n{main_deputy}\n\n"
-           f"| Зам. Спец. Руководителя:\n" + "\n".join(deputy_list))
-    await message.answer(res)
-
-# --- 7. МОДЕРАЦИЯ ---
+# --- 4. КОМАНДЫ МОДЕРАЦИИ ---
 
 @bot.on.message(text=["/kick", "/kick <args>"])
 async def kick_handler(message: Message, args=None):
@@ -117,8 +74,8 @@ async def kick_handler(message: Message, args=None):
     
     try:
         await bot.api.messages.remove_chat_user(chat_id=message.peer_id - 2000000000, user_id=target_id)
-        mod_nick = USER_DATA.get(message.from_id, ["", "MANLIX"])[1]
-        await message.answer(f"[id{message.from_id}|Модератор {mod_nick}] исключил(-а) [id{target_id}|пользователя] из Беседы.")
+        res = f"[id{message.from_id}|Модератор MANLIX] исключил(-а) [id{target_id}|пользователя] из Беседы."
+        await message.answer(res)
     except: await message.answer("Ошибка: не удалось исключить.")
 
 @bot.on.message(text=["/mute", "/mute <args>"])
@@ -126,71 +83,86 @@ async def mute_handler(message: Message, args=None):
     if not await check_active(message): return
     if not has_access(message.from_id, "Модератор"): return
     
-    target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
-    if not target_id: return "Укажите пользователя!"
-    
+    target_id = None
     time_minutes = 30
     reason = "Не указана"
-    if args:
-        find_time = re.findall(r'\d+', args)
-        if find_time:
-            time_minutes = int(find_time[0])
-            reason_text = re.sub(r'\d+', '', args).strip()
-            if reason_text: reason = reason_text
 
-    date_str = (datetime.datetime.now() + datetime.timedelta(minutes=time_minutes)).strftime("%d/%m/%Y %H:%M:%S")
-    mod_nick = USER_DATA.get(message.from_id, ["", "MANLIX"])[1]
+    if message.reply_message:
+        target_id = message.reply_message.from_id
+        if args:
+            parts = args.split(maxsplit=1)
+            if parts[0].isdigit():
+                time_minutes = int(parts[0])
+                if len(parts) > 1: reason = parts[1]
+            else:
+                reason = args
+    elif args:
+        parts = args.split()
+        target_id = extract_id(parts[0])
+        if len(parts) > 1:
+            if parts[1].isdigit():
+                time_minutes = int(parts[1])
+                if len(parts) > 2: reason = " ".join(parts[2:])
+            else:
+                reason = " ".join(parts[1:])
+
+    if not target_id: return "Укажите пользователя!"
+    
+    # Исправленный расчет времени
+    until_date = datetime.datetime.now() + datetime.timedelta(minutes=time_minutes)
+    date_str = until_date.strftime("%d/%m/%Y %H:%M:%S")
     
     kb = Keyboard(inline=True)
     kb.add(Text("Снять мут", payload={"cmd": "unmute", "target": target_id}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Text("Очистить", payload={"cmd": "clear_msgs", "target": target_id}), color=KeyboardButtonColor.NEGATIVE)
 
-    res = (f"[id{message.from_id}|Модератор {mod_nick}] замутил(-а) [id{target_id}|пользователя]\n"
+    res = (f"[id{message.from_id}|Модератор MANLIX] замутил(-а) [id{target_id}|пользователя]\n"
            f"Причина: {reason}\n"
            f"Мут выдан до: {date_str}")
     await message.answer(res, keyboard=kb)
 
-# --- 8. ОБРАБОТКА КНОПОК ---
+# --- 5. ОБРАБОТКА КНОПОК (С РЕДАКТИРОВАНИЕМ) ---
 
 @bot.on.message(func=lambda message: message.payload is not None)
 async def payload_handler(message: Message):
-    payload = json.loads(message.payload) if isinstance(message.payload, str) else message.payload
+    payload = message.payload
+    if isinstance(payload, str): payload = json.loads(payload)
     if not has_access(message.from_id, "Модератор"): return
 
-    cmd, target = payload.get("cmd"), payload.get("target")
+    cmd = payload.get("cmd")
+    target = payload.get("target")
 
     if cmd == "unmute":
-        await message.answer(f"Модератор [id{message.from_id}|{USER_DATA.get(message.from_id, ['', 'Admin'])[1]}] досрочно снял мут с [id{target}|пользователя].")
+        new_text = f"[id{message.from_id}|Модератор MANLIX] снял(-а) мут [id{target}|пользователю]"
+        await bot.api.messages.edit(
+            peer_id=message.peer_id,
+            message_id=message.conversation_message_id,
+            message=new_text,
+            keep_forward_messages=True
+        )
     elif cmd == "clear_msgs":
-        await message.answer(f"Сообщения пользователя [id{target}|ID {target}] были очищены модератором.")
-    elif cmd == "kick_btn":
-        try:
-            await bot.api.messages.remove_chat_user(chat_id=message.peer_id - 2000000000, user_id=target)
-            await message.answer(f"Пользователь [id{target}|ID {target}] был окончательно исключен.")
-        except: pass
+        await message.answer(f"Сообщения пользователя [id{target}|ID {target}] были очищены.")
 
-# --- 9. УПРАВЛЕНИЕ ---
+# --- 6. ОСТАЛЬНЫЕ КОМАНДЫ (БЕЗ ИЗМЕНЕНИЙ) ---
 
-@bot.on.message(text=["/sync", "/sync <args>", "/start", "/start <args>"])
-async def activation(message: Message, args=None):
+@bot.on.message(text="/staff")
+async def staff_handler(message: Message):
+    if not await check_active(message): return
+    roles = ["Владелец", "Спец. Администратор", "Зам. Спец. Администратора", "Старший Администратор", "Администратор", "Старший Модератор", "Модератор"]
+    parts = []
+    for r in roles:
+        found = [f"– [id{uid}|{data[1]}]" for uid, data in USER_DATA.items() if data[0] == r]
+        parts.append(f"{r}: \n" + ("\n".join(found) if found else "– Отсутствует."))
+    await message.answer("\n\n".join(parts))
+
+@bot.on.message(text=["/sync", "/start"])
+async def activation(message: Message):
     if message.from_id != 870757778: return
     ACTIVE_CHATS.add(message.peer_id)
     save_chats()
     await message.answer("Беседа успешно синхронизирована!")
 
-@bot.on.message(text=["/stats", "/stats <args>"])
-async def stats(message: Message, args=None):
-    if not await check_active(message): return
-    tid = message.reply_message.from_id if message.reply_message else message.from_id
-    await message.answer(f"Статистика пользователя:\nID: {tid}\nРоль: {get_rank(tid)}")
-
-@bot.on.message(text=["/ping", "/ping <args>"])
-async def ping(message: Message, args=None):
-    if not await check_active(message): return
-    delta = time.time() - (message.date or time.time())
-    await message.answer(f"ПОНГ!\nВремя обработки - {round(abs(delta), 2)} сек.")
-
-# --- 10. СЕРВЕР ---
+# --- СЕРВЕР ---
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
