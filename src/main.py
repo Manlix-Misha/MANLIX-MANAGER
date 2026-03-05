@@ -7,7 +7,7 @@ import aiohttp
 import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message
-from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType
+from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType, BaseMiddleware
 
 # --- 1. НАСТРОЙКИ ---
 GH_TOKEN = os.environ.get("GH_TOKEN")
@@ -57,7 +57,7 @@ async def push_to_github(updated_db, message_text="Update"):
                 return False
     except: return False
 
-# --- 3. СИСТЕМНАЯ ЛОГИКА ---
+# --- 3. СИСТЕМНАЯ ЛОГИКА И MIDDLEWARE ---
 
 bot = Bot(token=os.environ.get("TOKEN"))
 
@@ -67,14 +67,14 @@ def get_user_data(peer_id, user_id):
     staff = chat_data.get("staff", {})
     return staff.get(str(user_id), ["Пользователь", None])
 
-async def get_mention(peer_id, user_id):
-    if int(user_id) == 870757778: return "[id870757778|Misha Manlix]"
-    rank, nick = get_user_data(peer_id, user_id)
-    if nick: return f"[id{user_id}|{nick}]"
+async def get_nick(peer_id, user_id):
+    if int(user_id) == 870757778: return "Misha Manlix"
+    _, nick = get_user_data(peer_id, user_id)
+    if nick: return nick
     try:
         u = (await bot.api.users.get(user_ids=[user_id]))[0]
-        return f"[id{user_id}|{u.first_name} {u.last_name}]"
-    except: return f"[id{user_id}|пользователь]"
+        return f"{u.first_name} {u.last_name}"
+    except: return "Пользователь"
 
 def has_access(peer_id, user_id, required_rank):
     u_rank = get_user_data(peer_id, user_id)[0]
@@ -92,6 +92,20 @@ def extract_id(text):
     if match: return int(match.group(1))
     digits = re.findall(r'\d+', str(text))
     return int(digits[0]) if digits else None
+
+class MuteMiddleware(BaseMiddleware[Message]):
+    async def pre(self):
+        if not self.event.from_id: return
+        pid = str(self.event.peer_id)
+        uid = str(self.event.from_id)
+        if pid in DATABASE.get("chats", {}) and "mutes" in DATABASE["chats"][pid]:
+            if uid in DATABASE["chats"][pid]["mutes"]:
+                if datetime.datetime.now(datetime.timezone.utc).timestamp() < DATABASE["chats"][pid]["mutes"][uid]:
+                    try: await bot.api.messages.delete(message_ids=[self.event.conversation_message_id], peer_id=self.event.peer_id, delete_for_all=True)
+                    except: pass
+                    self.event.text = "" # Блокируем обработку команд
+
+bot.labeler.message_view.register_middleware(MuteMiddleware)
 
 # --- 4. СОБЫТИЯ БЕСЕДЫ ---
 
@@ -119,8 +133,7 @@ async def help_handler(message: Message):
     
     msg = "Команды пользователей:\n/info - официальные ресурсы \n/stats - статистика пользователя \n/getid - оригинальная ссылка VK.\n"
     
-    if weight >= 1:
-        msg += "\nКоманды для модераторов:\n/staff - Руководство Беседы \n/kick - исключить пользователя из Беседы. \n/mute - выдать Блокировку чата. \n/unmute - снять Блокировку чата.\n/setnick - установить имя пользователю.\n/rnick - удалить имя пользователю.\n/nlist - список пользователей с ником.\n"
+    if weight >= 1: msg += "\nКоманды для модераторов:\n/staff - Руководство Беседы \n/kick - исключить пользователя из Беседы. \n/mute - выдать Блокировку чата. \n/unmute - снять Блокировку чата.\n/setnick - установить имя пользователю.\n/rnick - удалить имя пользователю.\n/nlist - список пользователей с ником.\n"
     
     if weight >= 2: msg += "\nКоманды старших модераторов: \n/addmoder - выдать права модератора. \n/removerole - снять уровень прав.\n"
     elif weight >= 1: msg += "\nКоманды старших модераторов: \nОтсутствуют.\n"
@@ -131,7 +144,7 @@ async def help_handler(message: Message):
     if weight >= 4: msg += "\nКоманды старших администраторов: \n/addadmin - выдать права администратора.\n"
     elif weight >= 1: msg += "\nКоманды старших администраторов: \nОтсутствуют.\n"
     
-    if weight >= 5: msg += "\nКоманды заместителей спец. администраторов: \n/addsenadmin - выдать права старшего администратора.\n"
+    if weight >= 5: msg += "\nКоманды заместителей спец. администраторов: \n/addsenadmin - выдать права старшего модератора.\n"
     elif weight >= 1: msg += "\nКоманды заместителей спец. администраторов: \nОтсутствуют.\n"
     
     if weight >= 6: msg += "\nКоманды спец. администраторов:\n/addzsa - выдать права заместителя спец. администратора. \n"
@@ -147,12 +160,23 @@ async def help_handler(message: Message):
         if weight >= 10: bot_help += "\n\nСпец. Руководителя: \n/start - активировать Беседу.\n/sync - синхронизация с базой данных.\n/chatid - узнать айди Беседы.\n/delchat - удалить чат с Базы данных."
         await message.answer(bot_help)
 
+@bot.on.message(text="/info")
+async def info_cmd(m: Message):
+    if await check_active(m): await m.answer("Официальные ресурсы MANLIX: [Укажите ссылки]")
+
 @bot.on.message(text=["/getid", "/getid <args>"])
 async def getid_cmd(m: Message, args=None):
     if not await check_active(m): return
     target = m.reply_message.from_id if m.reply_message else (extract_id(args) or m.from_id)
-    target_mention = await get_mention(m.peer_id, target)
-    await m.answer(f"Оригинальная ссылка {target_mention}: https://vk.com/id{target}")
+    await m.answer(f"Оригинальная ссылка [id{target}|пользователя]: https://vk.com/id{target}")
+
+@bot.on.message(text=["/stats", "/stats <args>"])
+async def stats_cmd(m: Message, args=None):
+    if not await check_active(m): return
+    target = m.reply_message.from_id if m.reply_message else (extract_id(args) or m.from_id)
+    rank = get_user_data(m.peer_id, target)[0]
+    nick = await get_nick(m.peer_id, target)
+    await m.answer(f"Статистика [id{target}|пользователя]:\nНик: {nick}\nУровень прав: {rank}")
 
 @bot.on.message(text="/gstaff")
 async def gstaff_cmd(m: Message):
@@ -171,7 +195,7 @@ async def staff_list(m: Message):
         found = False
         for uid, data in staff_data.items():
             if data[0] == r:
-                res.append(f"– [id{uid}|{data[1]}]")
+                res.append(f"– [id{uid}|{data[1] if data[1] else 'Пользователь'}]")
                 found = True
         if not found: res.append("– Отсутствует.")
         res.append("")
@@ -190,7 +214,7 @@ async def nlist_cmd(m: Message):
     if idx == 1: res.append("Пусто.")
     await m.answer("\n".join(res))
 
-# --- 6. МОДЕРАЦИЯ И АДМИНИСТРИРОВАНИЕ ---
+# --- 6. НАКАЗАНИЯ (МУТ / КИК) ---
 
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_cmd(m: Message, args=None):
@@ -205,30 +229,52 @@ async def mute_cmd(m: Message, args=None):
     except:
         minutes, reason = 10, "Не указана"
 
-    time_str = (datetime.datetime.now() + datetime.timedelta(minutes=minutes)).strftime("%d/%m/%Y %H:%M:%S")
-    mod_mention = await get_mention(m.peer_id, m.from_id)
-    target_mention = await get_mention(m.peer_id, target)
+    # Московское время (UTC+3)
+    moscow_tz = datetime.timezone(datetime.timedelta(hours=3))
+    end_time = datetime.datetime.now(moscow_tz) + datetime.timedelta(minutes=minutes)
+    time_str = end_time.strftime("%d/%m/%Y %H:%M:%S")
+    
+    pid = str(m.peer_id)
+    if "chats" not in DATABASE: DATABASE["chats"] = {}
+    if pid not in DATABASE["chats"]: DATABASE["chats"][pid] = {}
+    if "mutes" not in DATABASE["chats"][pid]: DATABASE["chats"][pid]["mutes"] = {}
+    
+    DATABASE["chats"][pid]["mutes"][str(target)] = end_time.timestamp()
+    await push_to_github(DATABASE, f"Mute {target}")
     
     keyboard = (Keyboard(inline=True)
         .add(Text("Снять мут", {"cmd": "unmute_edit", "user": target}), color=KeyboardButtonColor.POSITIVE)
         .add(Text("Очистить", {"cmd": "clear"}), color=KeyboardButtonColor.NEGATIVE)
     ).get_json()
     
-    await m.answer(f"{mod_mention} выдал(-а) мут {target_mention}\nПричина: {reason}\nМут выдан до: {time_str}", keyboard=keyboard)
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] выдал(-а) мут [id{target}|пользователю]\nПричина: {reason}\nМут выдан до: {time_str}", keyboard=keyboard)
 
 @bot.on.message(payload_contains={"cmd": "unmute_edit"})
 async def unmute_edit(m: Message):
     if has_access(m.peer_id, m.from_id, "Модератор"):
         target = m.get_payload_json()["user"]
-        mod_mention = await get_mention(m.peer_id, m.from_id)
-        target_mention = await get_mention(m.peer_id, target)
-        await bot.api.messages.edit(peer_id=m.peer_id, conversation_message_id=m.conversation_message_id, message=f"{mod_mention} снял(-а) мут {target_mention}")
+        pid = str(m.peer_id)
+        if pid in DATABASE["chats"] and "mutes" in DATABASE["chats"][pid] and str(target) in DATABASE["chats"][pid]["mutes"]:
+            del DATABASE["chats"][pid]["mutes"][str(target)]
+            await push_to_github(DATABASE, f"Unmute {target}")
+        await bot.api.messages.edit(peer_id=m.peer_id, conversation_message_id=m.conversation_message_id, message=f"[id{m.from_id}|Модератор MANLIX] снял(-а) мут [id{target}|пользователю]")
 
 @bot.on.message(payload_contains={"cmd": "clear"})
 async def clear_edit(m: Message):
     if has_access(m.peer_id, m.from_id, "Модератор"):
         try: await bot.api.messages.delete(message_ids=[m.conversation_message_id], peer_id=m.peer_id, delete_for_all=True)
         except: pass
+
+@bot.on.message(text=["/unmute", "/unmute <args>"])
+async def unmute_cmd(m: Message, args=None):
+    if not await check_active(m) or not has_access(m.peer_id, m.from_id, "Модератор"): return
+    target = m.reply_message.from_id if m.reply_message else extract_id(args)
+    if not target: return
+    pid = str(m.peer_id)
+    if pid in DATABASE["chats"] and "mutes" in DATABASE["chats"][pid] and str(target) in DATABASE["chats"][pid]["mutes"]:
+        del DATABASE["chats"][pid]["mutes"][str(target)]
+        await push_to_github(DATABASE, f"Unmute {target}")
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) мут [id{target}|пользователю]")
 
 @bot.on.message(text=["/kick", "/kick <args>"])
 async def kick_cmd(m: Message, args=None):
@@ -237,10 +283,10 @@ async def kick_cmd(m: Message, args=None):
     if not target: return
     try:
         await bot.api.messages.remove_chat_user(chat_id=m.peer_id-2000000000, user_id=target)
-        mod_mention = await get_mention(m.peer_id, m.from_id)
-        target_mention = await get_mention(m.peer_id, target)
-        await m.answer(f"{mod_mention} исключил(-а) {target_mention} из Беседы.")
+        await m.answer(f"[id{m.from_id}|Модератор MANLIX] исключил(-а) [id{target}|пользователя] из Беседы.")
     except: pass
+
+# --- 7. ВЫДАЧА НИКОВ И ПРАВ ---
 
 @bot.on.message(text=["/setnick", "/setnick <args>"])
 async def setnick_cmd(m: Message, args=None):
@@ -256,9 +302,8 @@ async def setnick_cmd(m: Message, args=None):
     DATABASE["chats"][pid]["staff"][str(target)] = [u_rank, nick]
     
     await push_to_github(DATABASE, f"Nick {nick}")
-    mod_mention = await get_mention(m.peer_id, m.from_id)
-    target_mention = await get_mention(m.peer_id, target)
-    await m.answer(f"{mod_mention} установил(-а) новое имя {target_mention}")
+    mod_nick = await get_nick(m.peer_id, m.from_id)
+    await m.answer(f"[id{m.from_id}|{mod_nick}] установил(-а) новое имя [id{target}|пользователю]")
 
 @bot.on.message(text=["/rnick", "/rnick <args>"])
 async def rnick_cmd(m: Message, args=None):
@@ -268,20 +313,14 @@ async def rnick_cmd(m: Message, args=None):
     
     pid = str(m.peer_id)
     u_rank = get_user_data(m.peer_id, target)[0]
-    try:
-        u = (await bot.api.users.get(user_ids=[target]))[0]
-        real_name = f"{u.first_name} {u.last_name}"
-    except: real_name = "Пользователь"
 
     if pid in DATABASE["chats"] and str(target) in DATABASE["chats"][pid].get("staff", {}):
         if u_rank == "Пользователь": del DATABASE["chats"][pid]["staff"][str(target)]
-        else: DATABASE["chats"][pid]["staff"][str(target)] = [u_rank, real_name]
+        else: DATABASE["chats"][pid]["staff"][str(target)] = [u_rank, None]
         
     await push_to_github(DATABASE, "Remove nick")
-    mod_mention = await get_mention(m.peer_id, m.from_id)
-    await m.answer(f"{mod_mention} убрал(-а) имя [id{target}|{real_name}]")
-
-# --- 7. ВЫДАЧА ПРАВ ---
+    mod_nick = await get_nick(m.peer_id, m.from_id)
+    await m.answer(f"[id{m.from_id}|{mod_nick}] убрал(-а) имя [id{target}|пользователю]")
 
 async def grant_role(m: Message, args, req_rank, role_name, action_text):
     if not await check_active(m) or not has_access(m.peer_id, m.from_id, req_rank): return
@@ -289,12 +328,7 @@ async def grant_role(m: Message, args, req_rank, role_name, action_text):
     if not target: return
     
     pid = str(m.peer_id)
-    _, nick = get_user_data(m.peer_id, target)
-    if not nick:
-        try:
-            u = (await bot.api.users.get(user_ids=[target]))[0]
-            nick = f"{u.first_name} {u.last_name}"
-        except: nick = "Пользователь"
+    _, target_nick = get_user_data(m.peer_id, target)
 
     if "chats" not in DATABASE: DATABASE["chats"] = {}
     if pid not in DATABASE["chats"]: DATABASE["chats"][pid] = {"staff": {}}
@@ -302,12 +336,11 @@ async def grant_role(m: Message, args, req_rank, role_name, action_text):
     if role_name == "Пользователь" and str(target) in DATABASE["chats"][pid]["staff"]:
         del DATABASE["chats"][pid]["staff"][str(target)]
     else:
-        DATABASE["chats"][pid]["staff"][str(target)] = [role_name, nick]
+        DATABASE["chats"][pid]["staff"][str(target)] = [role_name, target_nick]
         
     await push_to_github(DATABASE, f"Role {role_name}")
-    mod_mention = await get_mention(m.peer_id, m.from_id)
-    target_mention = await get_mention(m.peer_id, target)
-    await m.answer(f"{mod_mention} {action_text} {target_mention}")
+    mod_nick = await get_nick(m.peer_id, m.from_id)
+    await m.answer(f"[id{m.from_id}|{mod_nick}] {action_text} [id{target}|пользователю]")
 
 @bot.on.message(text=["/addmoder", "/addmoder <args>"])
 async def addmoder_cmd(m: Message, args=None): await grant_role(m, args, "Старший Модератор", "Модератор", "выдал(-а) права модератора")
