@@ -9,11 +9,8 @@ from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text, BaseMiddleware
 
 # --- 1. ДАННЫЕ ---
-# Здесь ты можешь добавлять новых администраторов вручную
 USER_DATA = {
     870757778: ["Специальный Руководитель", "Misha Manlix"],
-    # Пример добавления второго зама:
-    # 123456789: ["Зам. Специального Руководителя", "Имя Зама"],
 }
 
 DB_FILE = "chats_db.json"
@@ -168,46 +165,31 @@ async def staff_handler(message: Message):
     d = {r: [] for r in ranks}
     for k, v in USER_DATA.items():
         if v[0] in d: d[v[0]].append(f"[id{k}|{v[1]}]")
-    res = "Состав модерации:\n\n"
-    for r in ranks: res += f"{r}: \n" + ("\n".join([f"– {x}" for x in d[r]]) if d[r] else "– Отсутствует.") + "\n\n"
+    res = ""
+    for r in ranks:
+        res += f"{r}: \n" + ("\n".join([f"– {x}" for x in d[r]]) if d[r] else "– Отсутствует.") + "\n\n"
     await message.answer(res.strip())
 
 @bot.on.message(text="/gstaff")
 async def gstaff_handler(message: Message):
     if not await check_active(message) or not has_access(message.from_id, "Зам. Специального Руководителя"): return
-    
-    # Настройка иерархии: Название роли и количество доступных мест (слотов)
     hierarchy = {
         "Специальный Руководитель": ["Специальный Руководитель", 1],
         "Основной зам. Специального Руководителя": ["Основной зам. Спец. Руководителя", 1],
         "Зам. Специального Руководителя": ["Зам. Спец. Руководителя", 2]
     }
-
-    # Собираем данные
     staff_data = {role: [] for role in hierarchy.keys()}
     for uid, info in USER_DATA.items():
         role = info[0]
-        if role in staff_data:
-            staff_data[role].append(f"[id{uid}|{info[1]}]")
-
+        if role in staff_data: staff_data[role].append(f"[id{uid}|{info[1]}]")
     res = "MANLIX MANAGER | Команда Бота:\n\n"
-
     for role_key, config in hierarchy.items():
         title, max_slots = config
         res += f"| {title}:\n"
-        
-        current_staff = staff_data[role_key]
-        # Выводим занятые слоты
-        for person in current_staff:
-            res += f"– {person}\n"
-        
-        # Добиваем пустые слоты до нужного количества
-        empty_slots_count = max_slots - len(current_staff)
-        for _ in range(max(0, empty_slots_count)):
-            res += "– Отсутствует.\n"
-        
+        for person in staff_data[role_key]: res += f"– {person}\n"
+        empty_slots = max_slots - len(staff_data[role_key])
+        for _ in range(max(0, empty_slots)): res += "– Отсутствует.\n"
         res += "\n"
-
     await message.answer(res.strip())
 
 @bot.on.message(text=["/getid", "/getid <args>"])
@@ -235,7 +217,4 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"ALIVE")
 
 threading.Thread(target=lambda: HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), Handler).serve_forever(), daemon=True).start()
-
-# Запуск
-print("Бот запущен!")
 bot.run_forever()
