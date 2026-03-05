@@ -4,9 +4,10 @@ import re
 import json
 import base64
 import aiohttp
+import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message
-from vkbottle.dispatch.rules.base import ChatActionRule
+from vkbottle import Keyboard, KeyboardButtonColor, Text
 
 # --- 1. НАСТРОЙКИ ---
 GH_TOKEN = os.environ.get("GH_TOKEN")
@@ -31,38 +32,29 @@ RANK_WEIGHT = {
     "Основной зам. Специального Руководителя": 9, "Специальный Руководитель": 10
 }
 
-# --- 2. РАБОТА С GITHUB (ИСПРАВЛЕННЫЙ 404) ---
+# --- 2. РАБОТА С GITHUB ---
 
 async def push_to_github(updated_db, message_text="Update"):
     url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
     headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    
     try:
         async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-            # Пытаемся получить SHA файла
             sha = None
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     sha = data['sha']
-                elif resp.status != 404:
-                    return f"GitHub Error: {resp.status}"
-
-            # Кодируем данные
             content_str = json.dumps(updated_db, ensure_ascii=False, indent=4)
             content_base64 = base64.b64encode(content_str.encode('utf-8')).decode('utf-8')
-            
             payload = {"message": message_text, "content": content_base64}
-            if sha: payload["sha"] = sha # Если файл был, добавляем SHA для обновления
-            
+            if sha: payload["sha"] = sha
             async with session.put(url, headers=headers, json=payload) as put_resp:
                 if put_resp.status in [200, 201]:
                     with open(EXTERNAL_DB, "w", encoding="utf-8") as f:
                         json.dump(updated_db, f, ensure_ascii=False, indent=4)
                     return True
-                return f"GitHub Push Error: {put_resp.status}"
-    except Exception as e:
-        return f"System Error: {str(e)}"
+                return f"GitHub Error: {put_resp.status}"
+    except Exception as e: return f"System Error: {str(e)}"
 
 # --- 3. СИСТЕМНАЯ ЛОГИКА ---
 
@@ -72,143 +64,115 @@ def get_rank(peer_id, user_id):
     return staff.get(str(user_id), ["Пользователь"])[0]
 
 def has_access(peer_id, user_id, required_rank):
-    u_rank = get_rank(peer_id, user_id)
-    return RANK_WEIGHT.get(u_rank, 0) >= RANK_WEIGHT.get(required_rank, 0)
+    return RANK_WEIGHT.get(get_rank(peer_id, user_id), 0) >= RANK_WEIGHT.get(required_rank, 0)
 
 async def check_active(message: Message):
     if int(message.from_id) == 870757778: return True
-    pid = str(message.peer_id)
-    if pid not in DATABASE.get("chats", {}):
-        await message.answer("Владелец беседы — не член команды бота, я не буду здесь работать!\n\nЧтобы я начал работу в данном чате тебе нужно обратиться к моему специальному руководителю написать ему или пригласи его в данный чат! Вк его: [https://vk.com/id870757778|Специальный руководитель].")
+    if str(message.peer_id) not in DATABASE.get("chats", {}):
+        await message.answer("Владелец беседы — не член команды бота, я не буду здесь работать!\n\nОбратитесь к: [https://vk.com/id870757778|Специальный руководитель].")
         return False
     return True
 
 def extract_id(text):
     if not text: return None
+    # Ищем id123, [id123|abc] или просто цифры
     match = re.search(r'id(\d+)', str(text))
     if match: return int(match.group(1))
     digits = re.findall(r'\d+', str(text))
     return int(digits[0]) if digits else None
 
-async def change_staff_rank(message, target_id, new_rank):
-    if not target_id: return await message.answer("Укажите пользователя!")
+async def change_rank(message, target_id, rank_name):
+    if not target_id:
+        return await message.answer("Вы не указали пользователя.")
     pid = str(message.peer_id)
     try:
-        u_info = await bot.api.users.get(user_ids=[target_id])
-        name = f"{u_info[0].first_name} {u_info[0].last_name}"
-        if "chats" not in DATABASE: DATABASE["chats"] = {}
+        u = await bot.api.users.get(user_ids=[target_id])
+        full_name = f"{u[0].first_name} {u[0].last_name}"
         if pid not in DATABASE["chats"]: DATABASE["chats"][pid] = {"staff": {}}
-        DATABASE["chats"][pid]["staff"][str(target_id)] = [new_rank, name]
-        
-        res = await push_to_github(DATABASE, f"Set {new_rank} for {target_id}")
+        DATABASE["chats"][pid]["staff"][str(target_id)] = [rank_name, full_name]
+        res = await push_to_github(DATABASE, f"Set {rank_name} for {target_id}")
         if res is True:
             await message.answer(f"[id{message.from_id}|Ник] изменил(-а) уровень прав [id{target_id}|пользователю]")
         else: await message.answer(res)
     except Exception as e: await message.answer(f"Ошибка: {e}")
 
-# --- 4. БОТ И КОМАНДЫ ---
+# --- 4. КОМАНДЫ ---
 
 bot = Bot(token=os.environ.get("TOKEN"))
+
+@bot.on.message(text="/help")
+async def help_handler(message: Message):
+    if not await check_active(message): return
+    msg1 = "Команды пользователей:\n/info - официальные ресурсы\n/stats - статистика пользователя\n/getid - оригинальная ссылка VK.\n\nКоманды для модераторов:\n/staff - Руководство Беседы\n/kick - исключить пользователя из Беседы.\n/mute - выдать Блокировку чата.\n/unmute - снять Блокировку чата.\n\nКоманды старших модераторов:\nОтсутствуют.\n\nКоманды администраторов:\nОтсутствуют.\n\nКоманды старших администраторов:\nОтсутствуют.\n\nКоманды заместителей спец. администраторов:\nОтсутствуют.\n\nКоманды спец. администраторов:\nОтсутствуют.\n\nКоманды владельца:\nОтсутствуют."
+    msg2 = "Команды руководства Бота:\n\nЗам. Спец. Руководителя:\n/gstaff - руководство Бота.\n/gbanpl - Блокировка пользователя во всех игровых Беседах.\n/gunbanpl - снятие Блокировки во всех игровых Беседах.\n\nОсновной Зам. Спец. Руководителя:\nОтсутствуют.\n\nСпец. Руководителя:\n/start - активировать Беседу.\n/sync - синхронизация с базой данных."
+    await message.answer(msg1)
+    await message.answer(msg2)
+
+@bot.on.message(text=["/addmoder", "/addmoder <args>"])
+async def add_moder(m: Message, args=None):
+    if await check_active(m) and has_access(m.peer_id, m.from_id, "Старший Модератор"):
+        target = m.reply_message.from_id if m.reply_message else extract_id(args)
+        await change_rank(m, target, "Модератор")
+
+@bot.on.message(text=["/addowner", "/addowner <args>"])
+async def add_owner(m: Message, args=None):
+    if has_access(m.peer_id, m.from_id, "Зам. Специального Руководителя"):
+        target = m.reply_message.from_id if m.reply_message else extract_id(args)
+        await change_rank(m, target, "Владелец")
+
+@bot.on.message(text=["/kick", "/kick <args>"])
+async def kick_handler(message: Message, args=None):
+    if not await check_active(message): return
+    if not has_access(message.peer_id, message.from_id, "Модератор"): return
+    tid = message.reply_message.from_id if message.reply_message else extract_id(args)
+    if not tid: return await message.answer("Укажите пользователя.")
+    try:
+        await bot.api.messages.remove_chat_user(chat_id=message.peer_id-2000000000, user_id=tid)
+        mod_rank = get_rank(message.peer_id, message.from_id)
+        await message.answer(f"[id{message.from_id}|{mod_rank} MANLIX] исключил(-а) [id{tid}|пользователя] из Беседы.")
+    except: await message.answer("Не удалось исключить.")
 
 @bot.on.message(text="/start")
 async def start_handler(message: Message):
     if int(message.from_id) != 870757778: return
     pid = str(message.peer_id)
-    if "chats" not in DATABASE: DATABASE["chats"] = {}
-    
-    if pid not in DATABASE["chats"]:
-        try:
-            c = await bot.api.messages.get_conversations_by_id(peer_ids=[message.peer_id])
-            title = c.items[0].chat_settings.title
-        except: title = "Беседа MANLIX"
-        
-        DATABASE["chats"][pid] = {
-            "manlix_id": len(DATABASE["chats"]) + 1,
-            "title": title,
-            "staff": {"870757778": ["Специальный Руководитель", "Misha Manlix"]}
-        }
-        res = await push_to_github(DATABASE, f"Activate chat {pid}")
-        if res is True: await message.answer("Вы успешно активировали Беседу!")
-        else: await message.answer(f"Ошибка активации: {res}")
-    else:
-        await message.answer("Беседа уже активирована.")
+    if pid not in DATABASE.get("chats", {}):
+        if "chats" not in DATABASE: DATABASE["chats"] = {}
+        DATABASE["chats"][pid] = {"staff": {"870757778": ["Специальный Руководитель", "Misha Manlix"]}}
+        await push_to_github(DATABASE, f"Activate {pid}")
+        await message.answer("Вы успешно активировали Беседу!")
+    else: await message.answer("Беседа уже активирована.")
 
 @bot.on.message(text="/getid")
 @bot.on.message(text="/getid <args>")
 async def getid_handler(message: Message, args=None):
     if not await check_active(message): return
-    tid = message.from_id
-    if message.reply_message: tid = message.reply_message.from_id
-    elif args:
-        ext = extract_id(args)
-        if ext: tid = ext
+    tid = message.reply_message.from_id if message.reply_message else (extract_id(args) or message.from_id)
     await message.answer(f"Оригинальная ссылка [id{tid}|пользователя]: https://vk.com/id{tid}")
 
-@bot.on.message(text="/gstaff")
-async def gstaff_handler(message: Message):
-    if not await check_active(message): return
-    await message.answer("MANLIX MANAGER | Команда Бота:\n\n| Специальный Руководитель:\n– [id870757778|Misha Manlix]\n\n| Основной зам. Спец. Руководителя:\n– Отсутствует.\n\n| Зам. Спец. Руководителя:\n– Отсутствует.\n– Отсутствует.")
+# Обработка кнопок и синхронизация
+@bot.on.message(payload_contains={"cmd": "unmute"})
+async def unmute_btn(message: Message):
+    if has_access(message.peer_id, message.from_id, "Модератор"):
+        await message.answer(f"Мут с пользователя [id{message.get_payload_json()['user']}|пользователя] снят.")
 
-@bot.on.message(text="/staff")
-async def staff_handler(message: Message):
-    if not await check_active(message): return
-    pid = str(message.peer_id)
-    st = DATABASE.get("chats", {}).get(pid, {}).get("staff", {})
-    ranks = ["Владелец", "Спец. Администратор", "Зам. Спец. Администратора", "Старший Администратор", "Администратор", "Старший Модератор", "Модератор"]
-    out = ["MANLIX MANAGER"]
-    for r in ranks:
-        us = [f"– [id{u}|{info[1]}]" for u, info in st.items() if info[0] == r]
-        out.append(f"{r}:\n" + ("\n".join(us) if us else "– Отсутствует."))
-    await message.answer("\n\n".join(out))
-
-# --- 5. КОМАНДЫ НАЗНАЧЕНИЯ ---
-
-@bot.on.message(text=["/addmoder", "/addmoder <args>"])
-async def a_mod(m: Message, args=None):
-    if await check_active(m) and has_access(m.peer_id, m.from_id, "Старший Модератор"):
-        await change_staff_rank(m, m.reply_message.from_id if m.reply_message else extract_id(args), "Модератор")
-
-@bot.on.message(text=["/addsenmoder", "/addsenmoder <args>"])
-async def a_smod(m: Message, args=None):
-    if await check_active(m) and has_access(m.peer_id, m.from_id, "Администратор"):
-        await change_staff_rank(m, m.reply_message.from_id if m.reply_message else extract_id(args), "Старший Модератор")
-
-@bot.on.message(text=["/addadmin", "/addadmin <args>"])
-async def a_adm(m: Message, args=None):
-    if await check_active(m) and has_access(m.peer_id, m.from_id, "Старший Администратор"):
-        await change_staff_rank(m, m.reply_message.from_id if m.reply_message else extract_id(args), "Администратор")
-
-@bot.on.message(text=["/addsenadmin", "/addsenadmin <args>"])
-async def a_sadm(m: Message, args=None):
-    if await check_active(m) and has_access(m.peer_id, m.from_id, "Зам. Спец. Администратора"):
-        await change_staff_rank(m, m.reply_message.from_id if m.reply_message else extract_id(args), "Старший Администратор")
-
-@bot.on.message(text=["/addsza", "/addsza <args>"])
-async def a_sza(m: Message, args=None):
-    if await check_active(m) and has_access(m.peer_id, m.from_id, "Спец. Администратор"):
-        await change_staff_rank(m, m.reply_message.from_id if m.reply_message else extract_id(args), "Зам. Спец. Администратора")
-
-@bot.on.message(text=["/addsa", "/addsa <args>"])
-async def a_sa(m: Message, args=None):
-    if await check_active(m) and has_access(m.peer_id, m.from_id, "Владелец"):
-        await change_staff_rank(m, m.reply_message.from_id if m.reply_message else extract_id(args), "Спец. Администратор")
-
-@bot.on.message(text=["/addowner", "/addowner <args>"])
-async def a_own(m: Message, args=None):
-    if has_access(m.peer_id, m.from_id, "Зам. Специального Руководителя"):
-        await change_staff_rank(m, m.reply_message.from_id if m.reply_message else extract_id(args), "Владелец")
+@bot.on.message(payload_contains={"cmd": "clear"})
+async def clear_btn(message: Message):
+    if has_access(message.peer_id, message.from_id, "Модератор"):
+        try: await bot.api.messages.delete(message_ids=[message.conversation_message_id], peer_id=message.peer_id, delete_for_all=True)
+        except: pass
 
 @bot.on.message(text="/sync")
-async def sync(message: Message):
-    if int(message.from_id) != 870757778: return
-    url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers={"Authorization": f"token {GH_TOKEN}"}) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                global DATABASE
-                DATABASE = json.loads(base64.b64decode(data['content']).decode('utf-8'))
-                await message.answer("Синхронизация завершена.")
+async def sync_handler(message: Message):
+    if int(message.from_id) == 870757778:
+        url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers={"Authorization": f"token {GH_TOKEN}"}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    global DATABASE
+                    DATABASE = json.loads(base64.b64decode(data['content']).decode('utf-8'))
+                    await message.answer("Синхронизация завершена успешно.")
 
 # --- СЕРВЕР ---
 class H(BaseHTTPRequestHandler):
