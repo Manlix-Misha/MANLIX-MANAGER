@@ -4,6 +4,7 @@ import re
 import time
 import json
 import datetime
+import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text, BaseMiddleware
@@ -26,7 +27,8 @@ def load_data(file, default):
 def save_data(file, data):
     try:
         with open(file, "w") as f: json.dump(data, f)
-    except: pass
+    except Exception as e:
+        print(f"Ошибка сохранения {file}: {e}")
 
 ACTIVE_CHATS = set(load_data(DB_FILE, []))
 ACTIVE_MUTES = load_data(MUTES_FILE, {}) # { "user_id": timestamp_end }
@@ -40,83 +42,71 @@ RANK_WEIGHT = {
 
 # --- 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def get_rank(user_id):
-    return USER_DATA.get(user_id, ["Пользователь"])[0]
+    return USER_DATA.get(int(user_id), ["Пользователь"])[0]
 
 def has_access(user_id, required_rank):
-    return RANK_WEIGHT.get(get_rank(user_id), 0) >= RANK_WEIGHT.get(required_rank, 0)
+    user_rank = get_rank(user_id)
+    return RANK_WEIGHT.get(user_rank, 0) >= RANK_WEIGHT.get(required_rank, 0)
 
 def extract_id(text):
     if not text: return None
     match = re.search(r'id(\d+)', str(text))
     if match: return int(match.group(1))
+    digits = re.findall(r'\d+', str(text))
+    if digits: return int(digits[0])
     return None
 
 async def check_active(message: Message):
-    if message.from_id == 870757778: return True
+    if int(message.from_id) == 870757778: return True
     if message.peer_id not in ACTIVE_CHATS:
         await message.answer("Владелец беседы не является командой Бота, я не буду здесь работать.")
         return False
     return True
 
-# --- 3. ИНИЦИАЛИЗАЦИЯ И МИДЛВАР (ПЕРЕХВАТЧИК МУТА) ---
+# --- 3. ИНИЦИАЛИЗАЦИЯ И МИДЛВАР ---
 bot = Bot(token=os.environ.get("TOKEN"))
 
 class MuteMiddleware(BaseMiddleware[Message]):
     async def pre(self):
         if self.event.from_id is None: return
-        uid = str(self.event.from_id)
-        if uid in ACTIVE_MUTES:
-            if time.time() < ACTIVE_MUTES[uid]:
+        uid_str = str(self.event.from_id)
+        if uid_str in ACTIVE_MUTES:
+            if time.time() < ACTIVE_MUTES[uid_str]:
                 try:
-                    # ДЛЯ УДАЛЕНИЯ БОТ ДОЛЖЕН БЫТЬ АДМИНСТРАТОРОМ БЕСЕДЫ
                     await self.event.ctx_api.messages.delete(
                         cmids=[self.event.conversation_message_id],
                         peer_id=self.event.peer_id,
                         delete_for_all=True
                     )
-                except: pass
-                self.stop("User is muted") # Моментальная блокировка дальнейших команд
+                except Exception as e:
+                    print(f"Не удалось удалить сообщение мута: {e}")
+                self.stop("User is muted")
             else:
-                del ACTIVE_MUTES[uid]
+                del ACTIVE_MUTES[uid_str]
                 save_data(MUTES_FILE, ACTIVE_MUTES)
 
-bot.labeler.message_view.register_middleware(MuteMiddleware())
+bot.labeler.message_view.middlewares.append(MuteMiddleware())
 
-# --- 4. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ И HELP ---
+# --- 4. КОМАНДЫ ---
 
 @bot.on.message(text="/help")
 async def help_handler(message: Message):
     if not await check_active(message): return
     uid = message.from_id
-
-    # Первый блок (основной)
-    msg1 = "Пользователь:\n/info - официальные ресурсы.\n/stats - статистика.\n/getid - узнать оригинальный ID пользователя.\n"
     
-    if has_access(uid, "Модератор"):
-        msg1 += "\nМодератор:\n/kick - исключить пользователя из Беседы.\n/mute - выдать Блокировку чата.\n/unmute - снять Блокировку чата.\n"
-    if has_access(uid, "Старший Модератор"):
-        msg1 += "\nСтарший Модератор:\nОтсутствуют.\n"
-    if has_access(uid, "Администратор"):
-        msg1 += "\nАдминистратор:\nОтсутствуют.\n"
-    if has_access(uid, "Старший Администратор"):
-        msg1 += "\nСтарший Администратор:\nОтсутствуют.\n"
-    if has_access(uid, "Зам. Спец. Администратора"):
-        msg1 += "\nЗам. Спец. Администратора:\nОтсутствуют.\n"
-    if has_access(uid, "Спец. Администратор"):
-        msg1 += "\nСпец. Администратор:\nОтсутствуют.\n"
-    if has_access(uid, "Владелец"):
-        msg1 += "\nВладелец:\nОтсутствуют.\n"
-        
-    await message.answer(msg1)
-
-    # Второй блок (руководство)
-    if has_access(uid, "Зам. Специального Руководителя"):
-        msg2 = "Зам. Специального Руководителя:\n/gstaff - руководство Бота.\n/gbanpl - Блокировка пользователя во всех игровых Беседах.\n/gunbanpl - Снятие Блокировки во всех игровых Беседах.\n"
-        if has_access(uid, "Основной зам. Специального Руководителя"):
-            msg2 += "\nОсновной зам. Специального Руководителя:\nОтсутствуют.\n"
-        if has_access(uid, "Специальный Руководитель"):
-            msg2 += "\nСпециальный Руководитель:\n/sync.\n"
-        await message.answer(msg2)
+    sections = {
+        "Пользователь": "/info, /stats, /getid",
+        "Модератор": "/kick, /mute, /unmute",
+        "Зам. Специального Руководителя": "/gstaff, /gbanpl, /gunbanpl",
+        "Специальный Руководитель": "/sync"
+    }
+    
+    res = "СПИСОК ДОСТУПНЫХ КОМАНД:\n\n"
+    for rank, cmds in sections.items():
+        if has_access(uid, rank):
+            res += f"- {rank}:\n{cmds}\n\n"
+            
+    await message.answer(res)
 
 @bot.on.message(text=["/getid", "/getid <args>"])
 async def getid_handler(message: Message, args=None):
@@ -125,60 +115,61 @@ async def getid_handler(message: Message, args=None):
     if args:
         ext = extract_id(args)
         if ext: target_id = ext
-    await message.answer(f"Оригинальная ссылка [id{target_id}|пользователя]:\nhttps://vk.com/id{target_id}")
+    await message.answer(f"Ссылка на [id{target_id}|пользователя]:\nhttps://vk.com/id{target_id}")
 
 @bot.on.message(text="/stats")
 async def stats_handler(message: Message):
     tid = message.reply_message.from_id if message.reply_message else message.from_id
-    status = "Синхронизировано" if message.peer_id in ACTIVE_CHATS else "Не синхронизировано"
-    await message.answer(f"Статистика [id{tid}|пользователя]:\nРоль: {get_rank(tid)}\nБеседа: {status}")
-
-# --- 5. КОМАНДЫ РУКОВОДСТВА ---
+    status = "Синхронизировано" if message.peer_id in ACTIVE_CHATS else "Нет связи"
+    await message.answer(f"Профиль [id{tid}|пользователя]:\nРоль: {get_rank(tid)}\nЧат: {status}")
 
 @bot.on.message(text="/sync")
 async def sync_handler(message: Message):
-    if message.from_id != 870757778: return
+    if int(message.from_id) != 870757778: return
     ACTIVE_CHATS.add(message.peer_id)
     save_data(DB_FILE, list(ACTIVE_CHATS))
-    await message.answer("[id870757778|Специальный Руководитель Misha Manlix] синхронизировал Беседу с Базой данных!")
+    await message.answer("Система: Беседа успешно синхронизирована с базой данных!")
 
 @bot.on.message(text="/gstaff")
 async def gstaff_handler(message: Message):
     if not await check_active(message) or not has_access(message.from_id, "Зам. Специального Руководителя"): return
-    res = ("MANLIX MANAGER | Команда Бота:\n\n| Специальный Руководитель:\n– [id870757778|Misha Manlix]\n\n"
-           "| Основной зам. Спец. Руководителя:\n– Отсутствует.\n\n| Зам. Спец. Руководителя:\n– Отсутствует.\n– Отсутствует.")
-    await message.answer(res)
-
-# --- 6. КОМАНДЫ МОДЕРАЦИИ ---
+    
+    staff_list = "КОМАНДА ПРОЕКТА:\n\n"
+    for uid, data in USER_DATA.items():
+        staff_list += f"- {data[0]}: [id{uid}|{data[1]}]\n"
+    
+    await message.answer(staff_list)
 
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_handler(message: Message, args=None):
     if not await check_active(message) or not has_access(message.from_id, "Модератор"): return
     
     target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
-    if not target_id: return "Укажите пользователя!"
+    if not target_id: return "Укажите пользователя (реплаем или через id)!"
 
-    time_min, reason = 30, "Не указана"
+    time_min = 30
+    reason = "Не указана"
+    
     if args:
-        nums = re.findall(r'\d+', args)
-        if message.reply_message:
-            if nums: time_min = int(nums[0])
-            reason = re.sub(r'^\d+\s*', '', args).strip() or "Не указана"
-        else:
-            if len(nums) >= 2: time_min = int(nums[1])
-            reason = re.sub(r'\[.*?\]|id\d+|\d+', '', args).strip() or "Не указана"
+        all_nums = re.findall(r'\d+', args)
+        if not message.reply_message and len(all_nums) >= 2:
+            time_min = int(all_nums[1])
+        elif message.reply_message and all_nums:
+            time_min = int(all_nums[0])
+            
+        clean_reason = re.sub(r'\[.*?\]|id\d+|\d+', '', args).strip()
+        if clean_reason: reason = clean_reason
 
     end_ts = time.time() + (time_min * 60)
     ACTIVE_MUTES[str(target_id)] = end_ts
     save_data(MUTES_FILE, ACTIVE_MUTES)
     
-    date_str = datetime.datetime.fromtimestamp(end_ts + 3*3600).strftime("%d/%m/%Y %H:%M:%S")
+    date_str = datetime.datetime.fromtimestamp(end_ts + 3*3600).strftime("%H:%M:%S")
     
     kb = Keyboard(inline=True)
     kb.add(Text("Снять мут", payload={"cmd": "unmute", "target": target_id}), color=KeyboardButtonColor.POSITIVE)
-    kb.add(Text("Очистить", payload={"cmd": "clear", "target": target_id}), color=KeyboardButtonColor.NEGATIVE)
 
-    await message.answer(f"[id{message.from_id}|Модератор MANLIX] замутил(-а) [id{target_id}|пользователя]\nПричина: {reason}\nМут выдан до: {date_str}", keyboard=kb)
+    await message.answer(f"Ограничение доступа: [id{message.from_id}|Модератор] выдал мут [id{target_id}|пользователю]\nПричина: {reason}\nСрок: до {date_str} (МСК)", keyboard=kb)
 
 @bot.on.message(text=["/unmute", "/unmute <args>"])
 async def unmute_cmd(message: Message, args=None):
@@ -186,22 +177,23 @@ async def unmute_cmd(message: Message, args=None):
     target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
     if not target_id: return
     
-    if str(target_id) in ACTIVE_MUTES:
-        del ACTIVE_MUTES[str(target_id)]
+    uid_str = str(target_id)
+    if uid_str in ACTIVE_MUTES:
+        del ACTIVE_MUTES[uid_str]
         save_data(MUTES_FILE, ACTIVE_MUTES)
-        await message.answer(f"[id{message.from_id}|Модератор MANLIX] снял(-а) мут [id{target_id}|пользователю]")
+        await message.answer(f"Мут для [id{target_id}|пользователя] снят.")
 
 @bot.on.message(text=["/kick", "/kick <args>"])
 async def kick_handler(message: Message, args=None):
     if not await check_active(message) or not has_access(message.from_id, "Модератор"): return
     target_id = message.reply_message.from_id if message.reply_message else extract_id(args)
     if not target_id: return
+    
     try:
         await bot.api.messages.remove_chat_user(chat_id=message.peer_id - 2000000000, user_id=target_id)
-        await message.answer(f"[id{message.from_id}|Модератор MANLIX] исключил(-а) [id{target_id}|пользователя] из Беседы.")
-    except: pass
-
-# --- 7. ОБРАБОТЧИК КНОПОК ---
+        await message.answer(f"Пользователь [id{target_id}|исключен] из беседы.")
+    except Exception as e:
+        await message.answer(f"Ошибка исключения: {e}")
 
 @bot.on.message(func=lambda message: getattr(message, "payload", None) is not None)
 async def payload_handler(message: Message):
@@ -213,11 +205,21 @@ async def payload_handler(message: Message):
             if tid in ACTIVE_MUTES: 
                 del ACTIVE_MUTES[tid]
                 save_data(MUTES_FILE, ACTIVE_MUTES)
-            await message.answer(f"[id{message.from_id}|Модератор MANLIX] снял(-а) мут [id{tid}|пользователю]")
-    except: pass
+            await message.answer(f"Модератор снял мут с пользователя [id{tid}|через кнопку]")
+    except Exception:
+        print(traceback.format_exc())
 
 # --- СЕРВЕР ---
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
-threading.Thread(target=lambda: HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), Handler).serve_forever(), daemon=True).start()
+    def do_GET(self): 
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"SERVER IS ALIVE")
+
+def run_server():
+    server_address = ('0.0.0.0', int(os.environ.get("PORT", 10000)))
+    httpd = HTTPServer(server_address, Handler)
+    httpd.serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
 bot.run_forever()
