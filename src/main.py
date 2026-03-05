@@ -14,12 +14,11 @@ from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType, BaseMi
 # --- 1. НАСТРОЙКИ ---
 GH_TOKEN = os.environ.get("GH_TOKEN")
 GH_REPO = os.environ.get("GH_REPO") 
-GH_PATH_DB = "database.json"      # Системный файл
-GH_PATH_ECO = "economy.json"     # Игровой файл
+GH_PATH_DB = "database.json"
+GH_PATH_ECO = "economy.json"
 EXTERNAL_DB = "database.json"
 EXTERNAL_ECO = "economy.json"
 
-# Флаг для отложенного сохранения экономики
 ECO_CHANGED = False
 
 def load_local_data(path):
@@ -63,10 +62,8 @@ async def push_to_github(data, gh_path, local_path, message_text="Update"):
                     with open(local_path, "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=4)
                     return True
-                return False
     except: return False
 
-# Фоновая задача для сохранения экономики раз в 5 минут
 async def auto_save_eco():
     global ECO_CHANGED
     while True:
@@ -75,7 +72,7 @@ async def auto_save_eco():
             if await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO, "Auto-save Economy"):
                 ECO_CHANGED = False
 
-# --- 3. СИСТЕМНАЯ ЛОГИКА И MIDDLEWARE ---
+# --- 3. СИСТЕМНАЯ ЛОГИКА ---
 
 bot = Bot(token=os.environ.get("TOKEN"))
 
@@ -108,9 +105,7 @@ def has_access(peer_id, user_id, required_rank):
 
 async def check_active(message: Message):
     if int(message.from_id) == 870757778: return True
-    if str(message.peer_id) not in DATABASE.get("chats", {}):
-        return False
-    return True
+    return str(message.peer_id) in DATABASE.get("chats", {})
 
 def extract_id(text):
     if not text: return None
@@ -122,14 +117,12 @@ def extract_id(text):
 class MuteMiddleware(BaseMiddleware[Message]):
     async def pre(self):
         if not self.event.from_id: return
-        pid = str(self.event.peer_id)
-        uid = str(self.event.from_id)
-        if pid in DATABASE.get("chats", {}) and "mutes" in DATABASE["chats"][pid]:
-            if uid in DATABASE["chats"][pid]["mutes"]:
-                if datetime.datetime.now(datetime.timezone.utc).timestamp() < DATABASE["chats"][pid]["mutes"][uid]:
-                    try: await bot.api.messages.delete(message_ids=[self.event.conversation_message_id], peer_id=self.event.peer_id, delete_for_all=True)
-                    except: pass
-                    self.event.text = "" 
+        pid, uid = str(self.event.peer_id), str(self.event.from_id)
+        mutes = DATABASE.get("chats", {}).get(pid, {}).get("mutes", {})
+        if uid in mutes and datetime.datetime.now(datetime.timezone.utc).timestamp() < mutes[uid]:
+            try: await bot.api.messages.delete(message_ids=[self.event.conversation_message_id], peer_id=self.event.peer_id, delete_for_all=True)
+            except: pass
+            self.event.text = "" 
 
 bot.labeler.message_view.register_middleware(MuteMiddleware)
 
@@ -142,22 +135,20 @@ async def ghelp_cmd(m: Message):
            "🎉 /prise — Получить ежечасный приз\n"
            "💰 /balance — Наличные средства\n"
            "🏦 /bank — Состояние счетов\n"
-           "📥 /положить [сумма] — Положить наличные в банк\n"
-           "💸 /перевести [ссылка] [сумма] — Перевод с банковского счета")
+           "📥 /положить [сумма] — Положить в банк\n"
+           "📤 /снять [сумма] — Снять из банка\n"
+           "💸 /перевести [ссылка] [сумма] — Перевод со счета на счет\n"
+           "🎰 /roulette [сумма] — Рулетка (x3, шанс 20%, мин. 100$)")
     await m.answer(msg)
 
 @bot.on.message(text="/prise")
 async def prise_cmd(m: Message):
     if not await check_active(m): return
     global ECO_CHANGED
-    user_id = m.from_id
-    data = get_eco_data(user_id)
-    
+    data = get_eco_data(m.from_id)
     now = datetime.datetime.now().timestamp()
     if now - data["last_prise"] < 3600:
-        remain = int((3600 - (now - data["last_prise"])) / 60)
-        return await m.answer(f"❌ Приз доступен раз в час! Подождите {remain} мин.")
-    
+        return await m.answer(f"❌ Приз доступен раз в час! Подождите {int((3600-(now-data['last_prise']))/60)} мин.")
     win = random.randint(100, 1000)
     data["balance"] += win
     data["last_prise"] = now
@@ -167,348 +158,155 @@ async def prise_cmd(m: Message):
 @bot.on.message(text="/balance")
 async def balance_cmd(m: Message):
     if not await check_active(m): return
-    data = get_eco_data(m.from_id)
-    await m.answer(f"💰 Ваш баланс (наличные): {data['balance']}$")
+    await m.answer(f"💰 Ваши наличные: {get_eco_data(m.from_id)['balance']}$")
 
 @bot.on.message(text="/bank")
 async def bank_cmd(m: Message):
     if not await check_active(m): return
     data = get_eco_data(m.from_id)
-    msg = (f"🏦 …::: MANLIX BANK :::…\n\n"
-           f"💵 Наличные: {data['balance']}$\n"
-           f"💳 На счету: {data['bank']}$")
-    await m.answer(msg)
+    await m.answer(f"🏦 …::: MANLIX BANK :::…\n\n💵 Наличные: {data['balance']}$\n💳 На счету: {data['bank']}$")
 
 @bot.on.message(text=["/положить", "/положить <amount:int>"])
 async def deposit_cmd(m: Message, amount: int = None):
-    if not await check_active(m): return
-    if amount is None or amount <= 0:
-        return await m.answer("⚠ Укажите сумму: /положить [число]")
-    
+    if not await check_active(m) or amount is None or amount <= 0: return
     global ECO_CHANGED
-    user = get_eco_data(m.from_id)
-    if user["balance"] < amount:
-        return await m.answer("⚠ У вас недостаточно наличных!")
-    
-    user["balance"] -= amount
-    user["bank"] += amount
+    u = get_eco_data(m.from_id)
+    if u["balance"] < amount: return await m.answer("⚠ Недостаточно наличных!")
+    u["balance"] -= amount
+    u["bank"] += amount
     ECO_CHANGED = True
     await m.answer(f"💲 Вы положили на свой счет: {amount}$")
 
+@bot.on.message(text=["/снять", "/снять <amount:int>"])
+async def withdraw_cmd(m: Message, amount: int = None):
+    if not await check_active(m) or amount is None or amount <= 0: return
+    global ECO_CHANGED
+    u = get_eco_data(m.from_id)
+    if u["bank"] < amount: return await m.answer("⚠ Недостаточно средств в банке!")
+    u["bank"] -= amount
+    u["balance"] += amount
+    ECO_CHANGED = True
+    await m.answer(f"💵 Вы сняли со счета: {amount}$")
+
 @bot.on.message(text=["/перевести", "/перевести <args>"])
 async def transfer_cmd(m: Message, args=None):
-    if not await check_active(m): return
-    if not args: return await m.answer("⚠ Пример: /перевести [ссылка] [сумма]")
-    
-    parts = args.split()
-    if len(parts) < 2: return await m.answer("⚠ Укажите пользователя и сумму.")
-    
-    target_id = extract_id(parts[0])
-    try:
-        amount = int(parts[1])
-    except:
-        return await m.answer("⚠ Сумма должна быть числом.")
-    
-    if amount <= 0: return await m.answer("⚠ Неверная сумма.")
-    if target_id == m.from_id: return await m.answer("⚠ Нельзя переводить самому себе.")
-
+    if not await check_active(m) or not args: return
+    p = args.split()
+    if len(p) < 2: return
+    tid, amt = extract_id(p[0]), int(p[1]) if p[1].isdigit() else 0
+    if amt <= 0 or tid == m.from_id: return
     global ECO_CHANGED
-    sender = get_eco_data(m.from_id)
-    if sender["bank"] < amount:
-        return await m.answer("⚠ На вашем банковском счету недостаточно средств!")
-    
-    receiver = get_eco_data(target_id)
-    sender["bank"] -= amount
-    receiver["bank"] += amount
+    s, r = get_eco_data(m.from_id), get_eco_data(tid)
+    if s["bank"] < amt: return await m.answer("⚠ Недостаточно денег в банке для перевода!")
+    s["bank"] -= amt
+    r["bank"] += amt
     ECO_CHANGED = True
-    
-    target_nick = await get_nick(m.peer_id, target_id)
-    await m.answer(f"💸 Вы перевели [id{target_id}|{target_nick}] {amount}$")
+    await m.answer(f"💸 Вы перевели [id{tid}|пользователю] {amt}$")
 
-@bot.on.message(text=["/setbal", "/setbal <args>"])
-async def setbal_cmd(m: Message, args=None):
-    if int(m.from_id) != 870757778: return
-    if not args: return
-    parts = args.split()
-    target = extract_id(parts[0])
-    try:
-        amount = int(parts[1])
-        global ECO_CHANGED
-        data = get_eco_data(target)
-        data["balance"] = amount
-        ECO_CHANGED = True
-        await m.answer(f"✅ Баланс [id{target}] установлен на {amount}$")
-    except: pass
+@bot.on.message(text=["/roulette", "/roulette <amount:int>"])
+async def roulette_cmd(m: Message, amount: int = None):
+    if not await check_active(m) or amount is None: return
+    if amount < 100: return await m.answer("🎰 Минимальная ставка — 100$")
+    global ECO_CHANGED
+    u = get_eco_data(m.from_id)
+    if u["balance"] < amount: return await m.answer("⚠ Недостаточно наличных!")
+    if random.randint(1, 5) == 1:
+        u["balance"] += (amount * 2)
+        await m.answer(f"🎰 Вы выиграли {amount*3}$\n(Ставка: {amount}$)")
+    else:
+        u["balance"] -= amount
+        await m.answer(f"🎰 Вы проиграли ставку {amount}$")
+    ECO_CHANGED = True
 
-# --- 5. СОБЫТИЯ БЕСЕДЫ ---
-
-@bot.on.raw_event(GroupEventType.MESSAGE_NEW, dataclass=Message)
-async def user_leave_handler(event: Message):
-    if event.action and event.action.type.value in ["chat_kick_user", "chat_exit_user"]:
-        keyboard = (Keyboard(inline=True)
-            .add(Text("Исключить", {"cmd": "kick_confirm", "user": event.action.member_id}), color=KeyboardButtonColor.NEGATIVE)
-        ).get_json()
-        await event.answer("Бот покинул(-а) Беседу", keyboard=keyboard)
-
-@bot.on.message(payload_contains={"cmd": "kick_confirm"})
-async def kick_confirm(m: Message):
-    if has_access(m.peer_id, m.from_id, "Модератор"):
-        try: await bot.api.messages.remove_chat_user(chat_id=m.peer_id-2000000000, user_id=m.get_payload_json()["user"])
-        except: pass
-
-# --- 6. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ / ИНФО ---
+# --- 5. МОДЕРАЦИЯ ---
 
 @bot.on.message(text="/help")
 async def help_handler(message: Message):
     if not await check_active(message): return
     rank = get_user_data(message.peer_id, message.from_id)[0]
-    weight = RANK_WEIGHT.get(rank, 0)
-    
+    w = RANK_WEIGHT.get(rank, 0)
     msg = "Команды пользователей:\n/info - официальные ресурсы \n/stats - статистика пользователя \n/getid - оригинальная ссылка VK.\n"
-    
-    if weight >= 1: msg += "\nКоманды для модераторов:\n/staff - Руководство Беседы \n/kick - исключить пользователя из Беседы. \n/mute - выдать Блокировку чата. \n/unmute - снять Блокировку чата.\n/setnick - установить имя пользователю.\n/rnick - удалить имя пользователю.\n/nlist - список пользователей с ником.\n"
-    if weight >= 2: msg += "\nКоманды старших модераторов: \n/addmoder - выдать права модератора. \n/removerole - снять уровень прав.\n"
-    if weight >= 3: msg += "\nКоманды администраторов:\n/addsenmoder - выдать права старшего модератора. \n"
-    if weight >= 4: msg += "\nКоманды старших администраторов: \n/addadmin - выдать права администратора.\n"
-    if weight >= 5: msg += "\nКоманды заместителей спец. администраторов: \n/addsenadmin - выдать права старшего модератора.\n"
-    if weight >= 6: msg += "\nКоманды спец. администраторов:\n/addzsa - выдать права заместителя спец. администратора. \n"
-    if weight >= 7: msg += "\nКоманды владельца:\n/addsa - выдать права специального администратора. \n"
-
-    await message.answer(msg.strip())
-    
-    if weight >= 8:
-        bot_help = "Команды руководства Бота:\n\nЗам. Спец. Руководителя:\n/gstaff - руководство Бота.\n/addowner - выдать права владельца.\n/gbanpl - Блокировка пользователя во всех игровых Беседах.\n/gunbanpl - снятие Блокировки во всех игровых Беседах. \n\nОсновной Зам. Спец. Руководителя:\nОтсутствуют."
-        if weight >= 10: bot_help += "\n\nСпец. Руководителя: \n/start - активировать Беседу.\n/sync - синхронизация с базой данных.\n/chatid - узнать айди Беседы.\n/delchat - удалить чат с Базы данных."
-        await message.answer(bot_help)
-
-@bot.on.message(text="/info")
-async def info_cmd(m: Message):
-    if await check_active(m): await m.answer("Официальные ресурсы MANLIX: [Укажите ссылки]")
-
-@bot.on.message(text=["/getid", "/getid <args>"])
-async def getid_cmd(m: Message, args=None):
-    if not await check_active(m): return
-    target = m.reply_message.from_id if m.reply_message else (extract_id(args) or m.from_id)
-    await m.answer(f"Оригинальная ссылка [id{target}|пользователя]: https://vk.com/id{target}")
+    if w >= 1: msg += "\nМодерация:\n/staff, /kick, /mute, /unmute, /setnick, /rnick, /nlist\n"
+    if w >= 2: msg += "/addmoder, /removerole\n"
+    if w >= 8: msg += "\nРуководство:\n/gstaff, /addowner, /gbanpl, /gunbanpl\n"
+    if w >= 10: msg += "/start, /sync, /delchat"
+    await message.answer(msg)
 
 @bot.on.message(text=["/stats", "/stats <args>"])
 async def stats_cmd(m: Message, args=None):
     if not await check_active(m): return
-    target = m.reply_message.from_id if m.reply_message else (extract_id(args) or m.from_id)
-    rank = get_user_data(m.peer_id, target)[0]
-    nick = await get_nick(m.peer_id, target)
-    eco = get_eco_data(target)
-    await m.answer(f"Статистика [id{target}|пользователя]:\nНик: {nick}\nУровень прав: {rank}\nНаличные: {eco['balance']}$\nВ банке: {eco['bank']}$")
-
-@bot.on.message(text="/gstaff")
-async def gstaff_cmd(m: Message):
-    if not await check_active(m): return
-    await m.answer("MANLIX MANAGER | Команда Бота:\n\n| Специальный Руководитель:\n– [id870757778|Misha Manlix]\n\n| Основной зам. Спец. Руководителя:\n– Отсутствует.\n\n| Зам. Спец. Руководителя:\n– Отсутствует.")
-
-@bot.on.message(text="/staff")
-async def staff_list(m: Message):
-    if not await check_active(m): return
-    staff_data = DATABASE.get("chats", {}).get(str(m.peer_id), {}).get("staff", {})
-    ranks_order = ["Владелец", "Спец. Администратор", "Зам. Спец. Администратора", "Старший Администратор", "Администратор", "Старший Модератор", "Модератор"]
-    res = []
-    for r in ranks_order:
-        res.append(f"{r}:")
-        found = False
-        for uid, data in staff_data.items():
-            if data[0] == r:
-                res.append(f"– [id{uid}|{data[1] if data[1] else 'Пользователь'}]")
-                found = True
-        if not found: res.append("– Отсутствует.")
-        res.append("")
-    await m.answer("\n".join(res).strip())
-
-@bot.on.message(text="/nlist")
-async def nlist_cmd(m: Message):
-    if not await check_active(m) or not has_access(m.peer_id, m.from_id, "Модератор"): return
-    staff_data = DATABASE.get("chats", {}).get(str(m.peer_id), {}).get("staff", {})
-    res = ["Список пользователей с ником:"]
-    idx = 1
-    for uid, data in staff_data.items():
-        if data[1]:
-            res.append(f"{idx}. [id{uid}|{data[1]}]")
-            idx += 1
-    if idx == 1: res.append("Пусто.")
-    await m.answer("\n".join(res))
-
-# --- 7. НАКАЗАНИЯ ---
+    t = m.reply_message.from_id if m.reply_message else (extract_id(args) or m.from_id)
+    r = get_user_data(m.peer_id, t)[0]
+    n = await get_nick(m.peer_id, t)
+    e = get_eco_data(t)
+    await m.answer(f"Статистика [id{t}|{n}]:\nПрава: {r}\nНаличные: {e['balance']}$\nБанк: {e['bank']}$")
 
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_cmd(m: Message, args=None):
     if not await check_active(m) or not has_access(m.peer_id, m.from_id, "Модератор"): return
-    target = m.reply_message.from_id if m.reply_message else extract_id(args)
-    if not target: return
-    parts = args.split() if args else []
-    try:
-        minutes = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else (int(parts[0]) if parts and parts[0].isdigit() else 10)
-        reason = " ".join(parts[2:]) if len(parts) > 2 else (" ".join(parts[1:]) if parts and not parts[0].isdigit() else "Не указана")
-    except: minutes, reason = 10, "Не указана"
-    moscow_tz = datetime.timezone(datetime.timedelta(hours=3))
-    end_time = datetime.datetime.now(moscow_tz) + datetime.timedelta(minutes=minutes)
+    t = m.reply_message.from_id if m.reply_message else extract_id(args)
+    if not t: return
+    end = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))) + datetime.timedelta(minutes=10)
     pid = str(m.peer_id)
-    if "chats" not in DATABASE: DATABASE["chats"] = {}
-    if pid not in DATABASE["chats"]: DATABASE["chats"][pid] = {}
+    if pid not in DATABASE["chats"]: DATABASE["chats"][pid] = {"mutes": {}}
     if "mutes" not in DATABASE["chats"][pid]: DATABASE["chats"][pid]["mutes"] = {}
-    DATABASE["chats"][pid]["mutes"][str(target)] = end_time.timestamp()
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, f"Mute {target}")
-    keyboard = (Keyboard(inline=True).add(Text("Снять мут", {"cmd": "unmute_edit", "user": target}), color=KeyboardButtonColor.POSITIVE).add(Text("Очистить", {"cmd": "clear"}), color=KeyboardButtonColor.NEGATIVE)).get_json()
-    await m.answer(f"[id{m.from_id}|Модератор] выдал мут [id{target}|пользователю] до {end_time.strftime('%H:%M:%S')}", keyboard=keyboard)
-
-@bot.on.message(payload_contains={"cmd": "unmute_edit"})
-async def unmute_edit(m: Message):
-    if has_access(m.peer_id, m.from_id, "Модератор"):
-        target = m.get_payload_json()["user"]
-        pid = str(m.peer_id)
-        if pid in DATABASE["chats"] and str(target) in DATABASE["chats"][pid].get("mutes", {}):
-            del DATABASE["chats"][pid]["mutes"][str(target)]
-            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, f"Unmute {target}")
-        await bot.api.messages.edit(peer_id=m.peer_id, conversation_message_id=m.conversation_message_id, message=f"Мут с [id{target}|пользователя] снят.")
-
-@bot.on.message(payload_contains={"cmd": "clear"})
-async def clear_edit(m: Message):
-    if has_access(m.peer_id, m.from_id, "Модератор"):
-        try: await bot.api.messages.delete(message_ids=[m.conversation_message_id], peer_id=m.peer_id, delete_for_all=True)
-        except: pass
-
-@bot.on.message(text=["/unmute", "/unmute <args>"])
-async def unmute_cmd(m: Message, args=None):
-    if not await check_active(m) or not has_access(m.peer_id, m.from_id, "Модератор"): return
-    target = m.reply_message.from_id if m.reply_message else extract_id(args)
-    if not target: return
-    pid = str(m.peer_id)
-    if pid in DATABASE["chats"] and str(target) in DATABASE["chats"][pid].get("mutes", {}):
-        del DATABASE["chats"][pid]["mutes"][str(target)]
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, f"Unmute {target}")
-    await m.answer(f"Мут снят с [id{target}|пользователя].")
-
-@bot.on.message(text=["/kick", "/kick <args>"])
-async def kick_cmd(m: Message, args=None):
-    if not await check_active(m) or not has_access(m.peer_id, m.from_id, "Модератор"): return
-    target = m.reply_message.from_id if m.reply_message else extract_id(args)
-    if not target: return
-    try:
-        await bot.api.messages.remove_chat_user(chat_id=m.peer_id-2000000000, user_id=target)
-        await m.answer(f"Пользователь [id{target}|исключен].")
-    except: pass
-
-# --- 8. ВЫДАЧА НИКОВ И ПРАВ ---
+    DATABASE["chats"][pid]["mutes"][str(t)] = end.timestamp()
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, "Mute")
+    await m.answer(f"Мут выдан [id{t}|пользователю] до {end.strftime('%H:%M:%S')}")
 
 @bot.on.message(text=["/setnick", "/setnick <args>"])
 async def setnick_cmd(m: Message, args=None):
     if not await check_active(m) or not has_access(m.peer_id, m.from_id, "Модератор"): return
-    target = m.reply_message.from_id if m.reply_message else extract_id(args)
-    nick = args.split()[-1] if args and len(args.split()) > 1 else args
-    if not target or not nick or "id" in nick: return
+    p = args.split()
+    t, nick = (m.reply_message.from_id if m.reply_message else extract_id(p[0])), p[-1]
+    if not t or not nick: return
     pid = str(m.peer_id)
-    u_rank = get_user_data(m.peer_id, target)[0]
-    if "chats" not in DATABASE: DATABASE["chats"] = {}
-    if pid not in DATABASE["chats"]: DATABASE["chats"][pid] = {"staff": {}}
-    DATABASE["chats"][pid]["staff"][str(target)] = [u_rank, nick]
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, f"Nick {nick}")
-    await m.answer(f"Ник установлен для [id{target}|пользователя].")
+    r = get_user_data(m.peer_id, t)[0]
+    DATABASE["chats"][pid]["staff"][str(t)] = [r, nick]
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, "Nick")
+    await m.answer(f"Ник {nick} установлен.")
 
-@bot.on.message(text=["/rnick", "/rnick <args>"])
-async def rnick_cmd(m: Message, args=None):
-    if not await check_active(m) or not has_access(m.peer_id, m.from_id, "Модератор"): return
-    target = m.reply_message.from_id if m.reply_message else extract_id(args)
-    if not target: return
+async def grant_role(m, args, req, role):
+    if not await check_active(m) or not has_access(m.peer_id, m.from_id, req): return
+    t = m.reply_message.from_id if m.reply_message else extract_id(args)
+    if not t: return
     pid = str(m.peer_id)
-    u_rank = get_user_data(m.peer_id, target)[0]
-    if pid in DATABASE["chats"] and str(target) in DATABASE["chats"][pid].get("staff", {}):
-        if u_rank == "Пользователь": del DATABASE["chats"][pid]["staff"][str(target)]
-        else: DATABASE["chats"][pid]["staff"][str(target)] = [u_rank, None]
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, "Remove nick")
-    await m.answer(f"Ник удален.")
-
-async def grant_role(m: Message, args, req_rank, role_name, action_text):
-    if not await check_active(m) or not has_access(m.peer_id, m.from_id, req_rank): return
-    target = m.reply_message.from_id if m.reply_message else extract_id(args)
-    if not target: return
-    pid = str(m.peer_id)
-    _, target_nick = get_user_data(m.peer_id, target)
-    if "chats" not in DATABASE: DATABASE["chats"] = {}
-    if pid not in DATABASE["chats"]: DATABASE["chats"][pid] = {"staff": {}}
-    if role_name == "Пользователь" and str(target) in DATABASE["chats"][pid]["staff"]:
-        del DATABASE["chats"][pid]["staff"][str(target)]
-    else: DATABASE["chats"][pid]["staff"][str(target)] = [role_name, target_nick]
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, f"Role {role_name}")
-    await m.answer(f"Права {role_name} выданы [id{target}|пользователю].")
+    _, n = get_user_data(m.peer_id, t)
+    if role == "Пользователь":
+        if str(t) in DATABASE["chats"][pid]["staff"]: del DATABASE["chats"][pid]["staff"][str(t)]
+    else: DATABASE["chats"][pid]["staff"][str(t)] = [role, n]
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, f"Role {role}")
+    await m.answer(f"Права {role} обновлены.")
 
 @bot.on.message(text=["/addmoder", "/addmoder <args>"])
-async def addmoder_cmd(m: Message, args=None): await grant_role(m, args, "Старший Модератор", "Модератор", "выдал права модератора")
-
-@bot.on.message(text=["/addsenmoder", "/addsenmoder <args>"])
-async def addsenmoder_cmd(m: Message, args=None): await grant_role(m, args, "Администратор", "Старший Модератор", "выдал права ст. модератора")
-
-@bot.on.message(text=["/addadmin", "/addadmin <args>"])
-async def addadmin_cmd(m: Message, args=None): await grant_role(m, args, "Старший Администратор", "Администратор", "выдал права админа")
-
-@bot.on.message(text=["/addsenadmin", "/addsenadmin <args>"])
-async def addsenadmin_cmd(m: Message, args=None): await grant_role(m, args, "Зам. Спец. Администратора", "Старший Администратор", "выдал права ст. админа")
-
-@bot.on.message(text=["/addzsa", "/addzsa <args>"])
-async def addzsa_cmd(m: Message, args=None): await grant_role(m, args, "Спец. Администратор", "Зам. Спец. Администратора", "выдал права ЗСА")
-
-@bot.on.message(text=["/addsa", "/addsa <args>"])
-async def addsa_cmd(m: Message, args=None): await grant_role(m, args, "Владелец", "Спец. Администратор", "выдал права СА")
-
-@bot.on.message(text=["/addowner", "/addowner <args>"])
-async def addowner_cmd(m: Message, args=None): await grant_role(m, args, "Зам. Специального Руководителя", "Владелец", "выдал права Владельца")
+async def am(m, args=None): await grant_role(m, args, "Старший Модератор", "Модератор")
 
 @bot.on.message(text=["/removerole", "/removerole <args>"])
-async def removerole_cmd(m: Message, args=None): await grant_role(m, args, "Старший Модератор", "Пользователь", "снял права")
-
-# --- 9. СИСТЕМНЫЕ КОМАНДЫ ---
+async def rr(m, args=None): await grant_role(m, args, "Старший Модератор", "Пользователь")
 
 @bot.on.message(text="/start")
 async def start_handler(m: Message):
     if int(m.from_id) != 870757778: return
-    pid = str(m.peer_id)
-    if "chats" not in DATABASE: DATABASE["chats"] = {}
-    DATABASE["chats"][pid] = {"staff": {"870757778": ["Специальный Руководитель", "Misha Manlix"]}}
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, f"Activate {pid}")
+    DATABASE["chats"][str(m.peer_id)] = {"staff": {"870757778": ["Специальный Руководитель", "Misha Manlix"]}}
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, "Start")
     await m.answer("Беседа активирована.")
 
 @bot.on.message(text="/sync")
 async def sync_cmd(m: Message):
     if int(m.from_id) != 870757778: return
-    headers = {"Authorization": f"token {GH_TOKEN}"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH_DB}", headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
+    h = {"Authorization": f"token {GH_TOKEN}"}
+    async with aiohttp.ClientSession() as s:
+        async with s.get(f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH_DB}", headers=h) as r:
+            if r.status == 200:
                 global DATABASE
-                DATABASE = json.loads(base64.b64decode(data['content']).decode('utf-8'))
-                with open(EXTERNAL_DB, "w", encoding="utf-8") as f:
-                    json.dump(DATABASE, f, ensure_ascii=False, indent=4)
-        async with session.get(f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH_ECO}", headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
+                DATABASE = json.loads(base64.b64decode((await r.json())['content']).decode('utf-8'))
+        async with s.get(f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH_ECO}", headers=h) as r:
+            if r.status == 200:
                 global ECONOMY
-                ECONOMY = json.loads(base64.b64decode(data['content']).decode('utf-8'))
-                with open(EXTERNAL_ECO, "w", encoding="utf-8") as f:
-                    json.dump(ECONOMY, f, ensure_ascii=False, indent=4)
+                ECONOMY = json.loads(base64.b64decode((await r.json())['content']).decode('utf-8'))
     await m.answer("Синхронизация завершена.")
 
-@bot.on.message(text="/chatid")
-async def chatid_cmd(m: Message):
-    if int(m.from_id) != 870757778: return
-    await m.answer(f"ID: {m.peer_id}")
-
-@bot.on.message(text="/delchat")
-async def delchat_cmd(m: Message):
-    if int(m.from_id) != 870757778: return
-    pid = str(m.peer_id)
-    if pid in DATABASE.get("chats", {}):
-        del DATABASE["chats"][pid]
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB, "Delete chat")
-        await m.answer("Чат удален из базы.")
-
-# --- СЕРВЕР И ЗАПУСК ---
+# --- ЗАПУСК ---
 class H(BaseHTTPRequestHandler):
     def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 
