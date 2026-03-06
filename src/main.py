@@ -7,6 +7,7 @@ import aiohttp
 import datetime
 import random
 import asyncio
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message, MessageEvent
 from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType, BaseMiddleware
@@ -129,7 +130,7 @@ async def push_to_github(data, gh_path, local_path):
 # ------------------------------
 # 3. Инициализация бота
 # ------------------------------
-bot = Bot(token=os.environ.get("TOKEN"))
+bot = Bot(token=os.environ.get("TOKEN"), loop=loop)
 
 GROUP_ID = None
 
@@ -1108,5 +1109,5 @@ if __name__ == "__main__":
     if "gstaff" not in DATABASE:
         DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
     threading.Thread(target=HTTPServer( ('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever, daemon=True).start()
-    bot.loop.create_task(send_reports())
+    loop.create_task(send_reports())
     bot.run_forever()
