@@ -131,8 +131,7 @@ async def push_to_github(data, gh_path, local_path):
 # ------------------------------
 bot = Bot(token=os.environ.get("TOKEN"))
 
-# Get group ID
-GROUP_ID = -loop.run_until_complete(bot.api.groups.get_by_id())[0].id
+GROUP_ID = None
 
 # ------------------------------
 # 4. Утилиты
@@ -358,7 +357,7 @@ async def mute_cmd(m: Message, args=None):
     kb.add(Text("Снять мут", {"cmd": "unmute", "u": t}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Text("Очистить", {"cmd": "clear"}), color=KeyboardButtonColor.NEGATIVE)
     a_name = f"[id{m.from_id}|Модератор MANLIX]"
-    await m.answer(f"{a_name} выдал(-а) мут [id{t}|пользователю]\nПричина: {reason}\nМут выдан до: {dt}", keyboard=kb)
+    await m.answer(f"{a_name} выдал(-а) мут [id{t}|пользователю]\nПричина: {reason}\nМут выдан до: {dt}", keyboard=kb.get_json())
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
 
 @bot.on.message(text=["/unmute", "/unmute <args>"])
@@ -902,7 +901,11 @@ async def getban_cmd(m: Message, args=None):
     if not t:
         return
     uid = str(t)
-    u_name = "пользователя"
+    try:
+        u_info = await bot.api.users.get([t])
+        u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
+    except:
+        u_name = "пользователя"
     ans = f"Информация о блокировках [id{t}|{u_name}]\n\n"
     for key, label in [("gbans_status", "общей Блокировке в Беседах"), ("gbans_pl", "общей Блокировке в Беседе игроков")]:
         ans += f"Информация о {label}: "
@@ -1007,12 +1010,15 @@ async def gstaff_view(m: Message):
 async def actions(m: Message):
     if not m.action:
         return
-    typ = m.action.type.value if hasattr(m.action.type, 'value') else str(m.action.type)
+    typ = m.action.type.value if hasattr(m.action.type, "value") else str(m.action.type)
     if typ == "chat_kick_user":
-        if m.action.member_id == GROUP_ID:  # Bot kicked
+        global GROUP_ID
+        if GROUP_ID is None:
+            GROUP_ID = (await bot.api.groups.get_by_id())[0].id
+        if m.action.member_id == -GROUP_ID:
             kb = Keyboard(inline=True)
             kb.add(Text("Исключить", {"cmd": "clear"}), color=KeyboardButtonColor.NEGATIVE)
-            await m.answer("Бот покинул(-а) Беседу", keyboard=kb)
+            await m.answer("Бот покинул(-а) Беседу", keyboard=kb.get_json())
         return
     if typ in ("chat_invite_user", "chat_invite_user_by_link"):
         invited = m.action.member_id
@@ -1027,6 +1033,7 @@ async def actions(m: Message):
                 except:
                     pass
                 await m.answer(f"[id870757778|Модератор MANLIX] исключил(-а) [id{invited}|пользователя] — он находится в списке блокировок.")
+        return
 
 @bot.on.raw_event(GroupEventType.MESSAGE_NEW)
 async def auto_kick(event):
@@ -1057,6 +1064,5 @@ if __name__ == "__main__":
         DATABASE["chats"] = {}
     if "gstaff" not in DATABASE:
         DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
-    threading.Thread(target=HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever, daemon=True).start()
+    threading.Thread(target=HTTPServer( ('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever, daemon=True).start()
     bot.run_forever()
-```            local.append(f
