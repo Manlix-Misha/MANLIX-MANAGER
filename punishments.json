@@ -1,5 +1,11 @@
 {
-    "gbans_status": {},
+    "gbans_status": {
+        "814386324": {
+            "admin": 870757778,
+            "reason": "к Боту закрыт.",
+            "date": 1772806427.548386
+        }
+    },
     "gbans_pl": {},
     "bans": {},
     "warns": {}
