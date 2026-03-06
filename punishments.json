@@ -1,11 +1,5 @@
 {
-    "gbans_status": {
-        "814386324": {
-            "admin": 870757778,
-            "reason": "Проекта",
-            "date": 1772806484.848482
-        }
-    },
+    "gbans_status": {},
     "gbans_pl": {},
     "bans": {},
     "warns": {}
