@@ -130,7 +130,7 @@ async def push_to_github(data, gh_path, local_path):
 # ------------------------------
 # 3. Инициализация бота
 # ------------------------------
-bot = Bot(token=os.environ.get("TOKEN"), loop=loop)
+bot = Bot(token=os.environ.get("TOKEN"))
 
 GROUP_ID = None
 
