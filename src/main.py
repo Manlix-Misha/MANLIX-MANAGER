@@ -131,6 +131,9 @@ async def push_to_github(data, gh_path, local_path):
 # ------------------------------
 bot = Bot(token=os.environ.get("TOKEN"))
 
+# Get group ID
+GROUP_ID = -loop.run_until_complete(bot.api.groups.get_by_id())[0].id
+
 # ------------------------------
 # 4. Утилиты
 # ------------------------------
@@ -355,7 +358,7 @@ async def mute_cmd(m: Message, args=None):
     kb.add(Text("Снять мут", {"cmd": "unmute", "u": t}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Text("Очистить", {"cmd": "clear"}), color=KeyboardButtonColor.NEGATIVE)
     a_name = f"[id{m.from_id}|Модератор MANLIX]"
-    await m.answer(f"{a_name} выдал(-а) мут [id{t}|пользователю]\nПричина: {reason}\nМут выдан до: {dt}", keyboard=kb.get_json())
+    await m.answer(f"{a_name} выдал(-а) мут [id{t}|пользователю]\nПричина: {reason}\nМут выдан до: {dt}", keyboard=kb)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
 
 @bot.on.message(text=["/unmute", "/unmute <args>"])
@@ -899,18 +902,14 @@ async def getban_cmd(m: Message, args=None):
     if not t:
         return
     uid = str(t)
-    try:
-        u_info = await bot.api.users.get([t])
-        u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
-    except:
-        u_name = "пользователя"
+    u_name = "пользователя"
     ans = f"Информация о блокировках [id{t}|{u_name}]\n\n"
     for key, label in [("gbans_status", "общей Блокировке в Беседах"), ("gbans_pl", "общей Блокировке в Беседе игроков")]:
         ans += f"Информация о {label}: "
         if uid in PUNISHMENTS.get(key, {}):
             b = PUNISHMENTS[key][uid]
             dt = datetime.datetime.fromtimestamp(b['date'], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
-            ans += f"\n[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-') } | {dt}\n\n"
+            ans += f"\n[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n\n"
         else:
             ans += "отсутствует\n\n"
     local = []
@@ -1010,7 +1009,7 @@ async def actions(m: Message):
         return
     typ = m.action.type.value if hasattr(m.action.type, 'value') else str(m.action.type)
     if typ == "chat_kick_user":
-        if m.action.member_id == -abs(bot.group_id):  # Bot kicked
+        if m.action.member_id == GROUP_ID:  # Bot kicked
             kb = Keyboard(inline=True)
             kb.add(Text("Исключить", {"cmd": "clear"}), color=KeyboardButtonColor.NEGATIVE)
             await m.answer("Бот покинул(-а) Беседу", keyboard=kb)
@@ -1058,6 +1057,6 @@ if __name__ == "__main__":
         DATABASE["chats"] = {}
     if "gstaff" not in DATABASE:
         DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
-    threading.Thread(target=HTTPServer( ('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever, daemon=True).start()
+    threading.Thread(target=HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever, daemon=True).start()
     bot.run_forever()
-```(1
+```            local.append(f
