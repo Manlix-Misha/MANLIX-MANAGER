@@ -1,14 +1,6 @@
 {
-    "gbans_pl": [],
-    "gbans_status": {
-        "1087903265": {
-            "admin": 870757778,
-            "reason": "порно",
-            "date": 1772792634.848458
-        }
-    },
-    "bans": {
-        "2000000016": []
-    },
+    "gbans_status": {},
+    "gbans_pl": {},
+    "bans": {},
     "warns": {}
 }
