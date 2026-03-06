@@ -13,7 +13,7 @@ from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType, BaseMi
 
 # --- 1. НАСТРОЙКИ ---
 GH_TOKEN = os.environ.get("GH_TOKEN")
-GH_REPO = os.environ.get("GH_REPO") 
+GH_REPO = os.environ.get("GH_REPO")
 GH_PATH_DB = "database.json"
 GH_PATH_ECO = "economy.json"
 GH_PATH_PUN = "punishments.json"
@@ -45,9 +45,15 @@ if "gbans_pl" not in PUNISHMENTS: PUNISHMENTS["gbans_pl"] = {}
 if "bans" not in PUNISHMENTS: PUNISHMENTS["bans"] = {}
 if "warns" not in PUNISHMENTS: PUNISHMENTS["warns"] = {}
 if "chats" not in DATABASE: DATABASE["chats"] = {}
+if "gstaff" not in DATABASE:  # структура для gstaff
+    DATABASE["gstaff"] = {
+        "spec": 870757778,
+        "main_zam": None,
+        "zams": []
+    }
 
 RANK_WEIGHT = {
-    "Пользователь": 0, "Модератор": 1, "Старший Модератор": 2, 
+    "Пользователь": 0, "Модератор": 1, "Старший Модератор": 2,
     "Администратор": 3, "Старший Администратор": 4, "Зам. Спец. Администратора": 5,
     "Спец. Администратор": 6, "Владелец": 7, "Зам. Спец. Руководителя": 8,
     "Основной Зам. Спец. Руководителя": 9, "Специальный Руководитель": 10
@@ -80,7 +86,6 @@ async def push_to_github(data, gh_path, local_path):
             if sha: payload["sha"] = sha
             async with session.put(url, headers=headers, json=payload) as resp2:
                 if resp2.status not in (200,201):
-                    # log
                     text = await resp2.text()
                     print("push_to_github failed:", resp2.status, text)
             with open(local_path, "w", encoding="utf-8") as f:
@@ -99,6 +104,8 @@ async def push_to_github(data, gh_path, local_path):
 
 def ensure_chat(pid: str):
     """Убедиться, что структура чата существует."""
+    if "chats" not in DATABASE:
+        DATABASE["chats"] = {}
     if pid not in DATABASE.get("chats", {}):
         DATABASE["chats"][pid] = {
             "title": f"Чат {pid}",
@@ -113,6 +120,8 @@ def ensure_chat(pid: str):
         if "staff" not in chat: chat["staff"] = {}
         if "mutes" not in chat: chat["mutes"] = {}
         if "stats" not in chat: chat["stats"] = {}
+
+bot = Bot(token=os.environ.get("TOKEN"))
 
 async def get_target_id(m: Message, args: str):
     # Если ответ на сообщение — берём из reply
@@ -133,9 +142,7 @@ async def get_target_id(m: Message, args: str):
             tval = getattr(res.type, "value", None) or getattr(res.type, "name", None) or res.type
             if str(tval).lower() == "user" or getattr(res, "object_id", None):
                 return res.object_id
-    except Exception as e:
-        # ignore
-        # print("resolve_screen_name error:", e)
+    except Exception:
         pass
     num = re.sub(r"\D", "", args)
     if num:
@@ -177,7 +184,7 @@ class ChatMiddleware(BaseMiddleware[Message]):
             if uid not in chat_data["stats"]:
                 chat_data["stats"][uid] = {"count": 0, "last": 0}
             chat_data["stats"][uid]["count"] += 1
-            chat_data["stats"][uid]["last"] = datetime.datetime.now(TZ_MSK).timestamp()
+            chat_data["stats"][uid]["last"] = datetime.datetime.datetime.now(TZ_MSK).timestamp() if hasattr(datetime, 'datetime') else datetime.datetime.now(TZ_MSK).timestamp()
         except Exception as e:
             print("middleware stats error:", e)
 
@@ -200,17 +207,14 @@ class ChatMiddleware(BaseMiddleware[Message]):
                     conversation_message_ids=[self.event.conversation_message_id],
                     delete_for_all=True
                 )
-            except Exception as e:
-                # Иногда удаление падает — просто логируем
-                # print("delete in middleware error:", e)
+            except Exception:
                 pass
             # Останавливаем дальнейшую обработку этого сообщения
             self.stop()
 
-bot = Bot(token=os.environ.get("TOKEN"))
 bot.labeler.message_view.register_middleware(ChatMiddleware)
 
-# --- 4. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ --- 
+# --- 4. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ ---
 @bot.on.message(text=["/help"])
 async def help_cmd(m: Message):
     ensure_chat(str(m.peer_id))
@@ -348,6 +352,7 @@ async def unmute_cmd(m: Message, args=None):
     pid = str(m.peer_id)
     if str(t) in DATABASE["chats"][pid].get("mutes", {}):
         del DATABASE["chats"][pid]["mutes"][str(t)]
+        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
         _, a_nick = get_user_info(m.peer_id, m.from_id)
         a_name = f"[id{m.from_id}|{a_nick}]" if a_nick else f"[id{m.from_id}|Ник]"
         await m.answer(f"{a_name} снял(-а) мут [id{t}|пользователю]")
@@ -448,20 +453,17 @@ async def ban_cmd(m: Message, args=None):
         if title:
             ensure_chat(pid)
             DATABASE["chats"][pid]["title"] = title
-    except Exception as e:
-        # ignore but log
-        # print("ban get title error:", e)
+    except Exception:
         pass
     # Попытка исключить из текущей беседы
     try:
         chat_id = m.peer_id - 2000000000
         await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
-    except Exception as e:
+    except Exception:
         try:
             await bot.api.messages.remove_chat_user(chat_id=chat_id, user_id=t)
         except Exception as e2:
-            # log both
-            print("ban removal error:", e, e2)
+            print("ban removal error:", e2)
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     _, a_nick = get_user_info(m.peer_id, m.from_id)
     a_name = f"[id{m.from_id}|{a_nick}]" if a_nick else f"[id{m.from_id}|Ник]"
@@ -624,7 +626,15 @@ async def staff_view(m: Message):
         members = []
         for u, (role, n) in staff.items():
             if role == r:
-                display = n if n else "Админ"
+                # display default: VK name (если ник не задан)
+                if n:
+                    display = n
+                else:
+                    try:
+                        uinfo = (await bot.api.users.get(user_ids=[int(u)]))[0]
+                        display = f"{uinfo.first_name} {uinfo.last_name}"
+                    except:
+                        display = "Пользователь"
                 members.append(f"[id{u}|{display}]")
         res += "\n".join(f"– {mbr}" for mbr in members) if members else "– Отсутствует."
         res += "\n\n"
@@ -635,18 +645,27 @@ async def setnick(m: Message, args=None):
     ensure_chat(str(m.peer_id))
     if not await check_access(m, "Модератор"):
         return
-    t = await get_target_id(m, args)
-    if not t or not args:
+    if not args:
         return
-    new_nick = args.split()[-1]
+    # args: "<target> <nick words...>"
+    parts = args.split()
+    # определяем цель (первый токен), остальное - ник (может быть из 2+ слов)
+    target_token = parts[0]
+    nick_words = parts[1:]
+    if not nick_words:
+        return await m.answer("Укажите ник (может быть из нескольких слов).")
+    t = await get_target_id(m, target_token)
+    if not t:
+        return
+    new_nick = " ".join(nick_words)
     pid, uid = str(m.peer_id), str(t)
-    role, _ = get_user_info(pid, uid)
+    role, _ = get_user_info(pid, t)
     ensure_chat(pid)
     DATABASE["chats"][pid]["staff"][uid] = [role, new_nick]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     _, a_nick = get_user_info(pid, m.from_id)
     a_name = f"[id{m.from_id}|{a_nick}]" if a_nick else f"[id{m.from_id}|Ник]"
-    await m.answer(f"{a_name} установил(-а) новое имя [id{t}|пользователю]")
+    await m.answer(f"{a_name} установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
 
 @bot.on.message(text=["/rnick", "/rnick <args>"])
 async def rnick(m: Message, args=None):
@@ -836,8 +855,7 @@ async def gbanpl_cmd(m: Message, args=None):
     try:
         chat_id = m.peer_id - 2000000000
         await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
-    except Exception as e:
-        # try alternative param name
+    except Exception:
         try:
             await bot.api.messages.remove_chat_user(chat_id=chat_id, user_id=t)
         except Exception:
@@ -881,26 +899,11 @@ async def gban(m: Message, args=None):
     if len(parts) > 1:
         reason = " ".join(parts[1:])
     uid = str(t)
+    # /gban теперь НЕ кикает — только сохраняет
     PUNISHMENTS["gbans_status"][uid] = {
         "admin": m.from_id, "reason": reason,
         "date": datetime.datetime.now(TZ_MSK).timestamp()
     }
-    # Исключаем из текущей беседы (и пробуем по всем чатом)
-    try:
-        chat_id = m.peer_id - 2000000000
-        await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
-    except:
-        try:
-            await bot.api.messages.remove_chat_user(chat_id=chat_id, user_id=t)
-        except:
-            pass
-    for pid in list(DATABASE.get("chats", {}).keys()):
-        try:
-            pnum = int(pid)
-            chat_id = pnum - 2000000000
-            await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
-        except:
-            pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     _, a_nick = get_user_info(m.peer_id, m.from_id)
     a_name = f"[id{m.from_id}|{a_nick}]" if a_nick else f"[id{m.from_id}|Ник]"
@@ -939,7 +942,7 @@ async def getban_cmd(m: Message, args=None):
         if uid in PUNISHMENTS.get(key, {}):
             b = PUNISHMENTS[key][uid]
             dt = datetime.datetime.fromtimestamp(b['date'], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
-            ans += f"\n[id{b['admin']}|Модератор MANLIX] | {b['reason']} | {dt}\n\n"
+            ans += f"\n[id{b['admin']}|Модератор MANLIX] | {b.get('reason','-')} | {dt}\n\n"
         else:
             ans += "отсутствует\n\n"
     local = []
@@ -1008,6 +1011,33 @@ async def delchat(m: Message):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer("Вы успешно удалили чат с Базы данных.")
 
+# --- gstaff ---
+@bot.on.message(text="/gstaff")
+async def gstaff_cmd(m: Message):
+    # строим сообщение по шаблону, беря данные из DATABASE["gstaff"]
+    gs = DATABASE.get("gstaff", {"spec": 870757778, "main_zam": None, "zams": []})
+    def fmt(uid):
+        if not uid:
+            return "Отсутствует."
+        return f"[id{uid}|{ ( ( ( ( ( 'Misha Manlix' ) ) ) ) ) if uid == 870757778 else ('Пользователь') ) }]"
+    # Для спец.руководителя используем корректное отображение (id870757778 -> Misha Manlix)
+    spec = f"[id{gs.get('spec')}|Misha Manlix]" if gs.get('spec') == 870757778 else fmt(gs.get('spec'))
+    main_zam = fmt(gs.get('main_zam'))
+    zams = gs.get('zams') or []
+    zam_lines = ""
+    if not zams:
+        zam_lines = "– Отсутствует.\n– Отсутствует."
+    else:
+        for z in zams:
+            zam_lines += f"– {fmt(z)}\n"
+    msg = (
+        "MANLIX MANAGER | Команда Бота:\n\n"
+        f"| Специальный Руководитель:\n– {spec}\n\n"
+        f"| Основной зам. Спец. Руководителя:\n– {main_zam}\n\n"
+        f"| Зам. Спец. Руководителя:\n{zam_lines}"
+    )
+    await m.answer(msg)
+
 # --- Обработка системных действий: авто-кик при приглашении / добавлении ---
 @bot.on.message()
 async def actions(m: Message):
@@ -1060,6 +1090,40 @@ async def actions(m: Message):
                     pass
         return
 
+# Автокик при входе - raw event (дополнительно, на случай других форматов)
+@bot.on.raw_event(GroupEventType.MESSAGE_NEW)
+async def auto_kick(event):
+    try:
+        obj = event.object
+        if not obj:
+            return
+        # в разных версиях поле может называться по-разному
+        if isinstance(obj, dict):
+            msg = obj.get("message") or obj
+            action = msg.get("action") if isinstance(msg, dict) else None
+            if action and action.get("type") in ("chat_invite_user", "chat_invite_user_by_link", "invite_user"):
+                member_id = action.get("member_id") or action.get("user_id") or action.get("member_ids")
+                if isinstance(member_id, list):
+                    # обрабатываем всех приглашённых
+                    for mid in member_id:
+                        if str(mid) in PUNISHMENTS.get("gbans_pl", {}):
+                            try:
+                                peer = msg.get("peer_id")
+                                chat_id = int(peer) - 2000000000
+                                await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=mid)
+                            except:
+                                pass
+                else:
+                    if member_id and str(member_id) in PUNISHMENTS.get("gbans_pl", {}):
+                        try:
+                            peer = msg.get("peer_id")
+                            chat_id = int(peer) - 2000000000
+                            await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=member_id)
+                        except:
+                            pass
+    except Exception:
+        pass
+
 # --- 9. ЗАПУСК ---
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -1071,6 +1135,8 @@ if __name__ == "__main__":
     # На старте убедимся, что база имеет нужную структуру
     if "chats" not in DATABASE:
         DATABASE["chats"] = {}
+    if "gstaff" not in DATABASE:
+        DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
     # Запускаем HTTP сервер для Render
     threading.Thread(
         target=lambda: HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever(),
