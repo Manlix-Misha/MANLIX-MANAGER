@@ -1,6 +1,8 @@
 {
     "gbans_pl": [],
-    "gbans_status": {},
+    "gbans_status": {
+        "1087903265": "к Боту закрыт."
+    },
     "bans": {},
     "warns": {}
 }
