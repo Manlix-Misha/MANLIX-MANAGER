@@ -1,11 +1,5 @@
 {
-    "gbans_status": {
-        "478437927": {
-            "admin": 870757778,
-            "reason": "Нарушение",
-            "date": 1772811737.948828
-        }
-    },
+    "gbans_status": {},
     "gbans_pl": {},
     "bans": {},
     "warns": {}
