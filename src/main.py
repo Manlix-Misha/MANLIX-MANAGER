@@ -8,7 +8,6 @@ import datetime
 import random
 import asyncio
 import time
-import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message, MessageEvent
 from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType, BaseMiddleware
@@ -43,7 +42,7 @@ RANK_WEIGHT = {
 }
 
 # ------------------------------
-# Загрузка данных из GitHub / локально
+# Загрузка данных
 # ------------------------------
 async def load_from_github(gh_path, local_path):
     if not GH_TOKEN or not GH_REPO:
@@ -87,7 +86,7 @@ DATABASE = loop.run_until_complete(load_from_github(GH_PATH_DB, EXTERNAL_DB))
 ECONOMY = loop.run_until_complete(load_from_github(GH_PATH_ECO, EXTERNAL_ECO))
 PUNISHMENTS = loop.run_until_complete(load_from_github(GH_PATH_PUN, EXTERNAL_PUN))
 
-# Безопасная инициализация структур
+# Безопасная инициализация
 if not isinstance(DATABASE, dict): DATABASE = {}
 if not isinstance(ECONOMY, dict): ECONOMY = {}
 if not isinstance(PUNISHMENTS, dict): PUNISHMENTS = {}
@@ -100,7 +99,7 @@ if "gstaff" not in DATABASE:
     DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
 
 # ------------------------------
-# Сохранение в GitHub / локально
+# Сохранение
 # ------------------------------
 async def push_to_github(data, gh_path, local_path):
     if not GH_TOKEN or not GH_REPO:
@@ -108,7 +107,7 @@ async def push_to_github(data, gh_path, local_path):
             with open(local_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
         except Exception as e:
-            print("push_to_github local save error:", e)
+            print("local save error:", e)
         return
     url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
     headers = {"Authorization": f"token {GH_TOKEN}"}
@@ -125,20 +124,14 @@ async def push_to_github(data, gh_path, local_path):
                 payload["sha"] = sha
             async with session.put(url, headers=headers, json=payload) as resp2:
                 if resp2.status not in (200, 201):
-                    text = await resp2.text()
-                    print("push_to_github failed:", resp2.status, text)
+                    print("push failed:", resp2.status, await resp2.text())
             with open(local_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        print("push_to_github exception:", e)
-        try:
-            with open(local_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
-        except Exception as e2:
-            print("push_to_github local fallback error:", e2)
+        print("push exception:", e)
 
 # ------------------------------
-# Инициализация бота
+# Бот
 # ------------------------------
 bot = Bot(token=os.environ.get("TOKEN"))
 
@@ -183,7 +176,7 @@ async def get_target_id(m: Message, args: str = None):
             res = await bot.api.utils.resolve_screen_name(screen_name=raw)
             if res and res.type == "user":
                 return int(res.object_id)
-        except Exception:
+        except:
             pass
     num = re.sub(r"\D", "", args)
     if num:
@@ -218,7 +211,7 @@ async def check_access(m: Message, min_rank: str):
     return True
 
 # ------------------------------
-# Middleware — удаление сообщений забаненных/замученных
+# Middleware
 # ------------------------------
 class ChatMiddleware(BaseMiddleware[Message]):
     async def pre(self):
@@ -246,14 +239,14 @@ class ChatMiddleware(BaseMiddleware[Message]):
                     conversation_message_ids=[self.event.conversation_message_id],
                     delete_for_all=True
                 )
-            except Exception:
+            except:
                 pass
             self.stop()
 
 bot.labeler.message_view.register_middleware(ChatMiddleware)
 
 # ------------------------------
-# Команды /help, /info, /getid, /stats
+# Команды
 # ------------------------------
 @bot.on.message(text=["/help"])
 async def help_cmd(m: Message):
@@ -303,15 +296,15 @@ async def help_cmd(m: Message):
             "Зам. Спец. Руководителя:\n"
             "/gstaff - руководство Бота.\n"
             "/addowner - выдать права владельца.\n"
-            "/gbanpl - Блокировка пользователя во всех игровых Беседах.\n"
-            "/gunbanpl - снятие Блокировки во всех игровых Беседах.\n\n"
+            "/gbanpl - блокировка пользователя во всех игровых Беседах.\n"
+            "/gunbanpl - снятие блокировки во всех игровых Беседах.\n\n"
             "Основной Зам. Спец. Руководителя:\nОтсутствуют.\n\n"
             "Спец. Руководителя:\n"
             "/start - активировать Беседу.\n"
             "/type - изменить тип Беседы.\n"
             "/sync - синхронизация с базой данных.\n"
             "/chatid - узнать айди Беседы.\n"
-            "/delchat - удалить чат с Базы данных."
+            "/delchat - удалить чат из Базы данных."
         )
         await m.answer(gres)
 
@@ -350,9 +343,7 @@ async def stats_cmd(m: Message, args=None):
     )
     await m.answer(msg)
 
-# ------------------------------
-# Мут / Размут + кнопки
-# ------------------------------
+# Мут / Размут
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_cmd(m: Message, args=None):
     if not await check_access(m, "Модератор"):
@@ -433,9 +424,7 @@ async def buttons(event: MessageEvent):
         except Exception as e:
             print("delete error:", e)
 
-# ------------------------------
 # Кик / Бан / Разбан
-# ------------------------------
 @bot.on.message(text=["/kick", "/kick <args>"])
 async def kick_cmd(m: Message, args=None):
     if not await check_access(m, "Модератор"):
@@ -501,9 +490,7 @@ async def unban_cmd(m: Message, args=None):
     a_name = f"[id{m.from_id}|Модератор MANLIX]"
     await m.answer(f"{a_name} разблокировал [id{t}|пользователя] в беседе.")
 
-# ------------------------------
-# Выдача / снятие ролей и ников
-# ------------------------------
+# Роли
 async def set_role_in_chat(pid: str, uid: str, role_name: str):
     ensure_chat(pid)
     current = DATABASE["chats"][pid]["staff"].get(uid, [role_name, None])
@@ -1028,7 +1015,7 @@ async def roulette(m: Message, amount=None):
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
 
 # ------------------------------
-# Системные события и автокик
+# Системные события
 # ------------------------------
 @bot.on.message()
 async def actions(m: Message):
@@ -1074,7 +1061,7 @@ async def auto_kick(event):
                     pass
 
 # ------------------------------
-# Технические отчёты (только в tex-беседах)
+# Технические отчёты
 # ------------------------------
 async def send_reports():
     while True:
@@ -1103,21 +1090,22 @@ async def send_reports():
         await asyncio.sleep(1)
 
 # ------------------------------
-# Keep-Alive для Render (чтобы не засыпал на бесплатном тарифе)
+# Keep-Alive (асинхронный)
 # ------------------------------
 async def keep_alive():
     while True:
         try:
             url = os.environ.get("RENDER_EXTERNAL_URL")
             if url:
-                requests.get(url + "?keepalive=1", timeout=10)
-                print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive ping отправлен")
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url + "?keepalive=1", timeout=10) as resp:
+                        print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive ping → {resp.status}")
         except Exception as e:
             print("Keep-alive error:", e)
-        await asyncio.sleep(600)  # каждые 10 минут
+        await asyncio.sleep(600)  # 10 минут
 
 # ------------------------------
-# HTTP-сервер + запуск бота
+# HTTP-сервер + запуск
 # ------------------------------
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -1131,15 +1119,13 @@ if __name__ == "__main__":
     if "gstaff" not in DATABASE:
         DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
 
-    # Запуск встроенного HTTP-сервера (обязателен для Render Web Service)
     threading.Thread(
         target=HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever,
         daemon=True
     ).start()
 
-    # Запуск фоновых задач
     loop.create_task(send_reports())
     loop.create_task(keep_alive())
 
-    print("Бот запущен успешно. Keep-alive и тех.отчёты активны.")
+    print("Бот запущен. Keep-alive и тех.отчёты активны.")
     bot.run_forever()
