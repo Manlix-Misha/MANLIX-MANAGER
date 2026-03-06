@@ -1,5 +1,6 @@
 {
-    "gbans": [],
+    "gbans_pl": [],
+    "gbans_status": {},
     "bans": {},
     "warns": {}
 }
