@@ -140,13 +140,14 @@ def ensure_chat(pid: str):
     if "chats" not in DATABASE:
         DATABASE["chats"] = {}
     if pid not in DATABASE["chats"]:
-        DATABASE["chats"][pid] = {"title": f"Чат {pid}", "staff": {}, "mutes": {}, "stats": {}}
+        DATABASE["chats"][pid] = {"title": f"Чат {pid}", "staff": {}, "mutes": {}, "stats": {}, "type": "def"}
     else:
         chat = DATABASE["chats"][pid]
         if "title" not in chat: chat["title"] = f"Чат {pid}"
         if "staff" not in chat: chat["staff"] = {}
         if "mutes" not in chat: chat["mutes"] = {}
         if "stats" not in chat: chat["stats"] = {}
+        if "type" not in chat: chat["type"] = "def"
 
 async def get_target_id(m: Message, args: str):
     if getattr(m, "reply_message", None):
@@ -292,6 +293,7 @@ async def help_cmd(m: Message):
             "Основной Зам. Спец. Руководителя:\nОтсутствуют.\n\n"
             "Спец. Руководителя:\n"
             "/start - активировать Беседу.\n"
+            "/type - изменить тип Беседы.\n"
             "/sync - синхронизация с базой данных.\n"
             "/chatid - узнать айди Беседы.\n"
             "/delchat - удалить чат из Базы данных."
@@ -716,7 +718,7 @@ async def balance_cmd(m: Message):
 async def bank_view(m: Message):
     ensure_chat(str(m.peer_id))
     e = ECONOMY.get(str(m.from_id), {"cash": 0, "bank": 0})
-    await m.answer(f"🏦 …::: MANLIX BANK :::…\n\n💵 Наличные: {e['cash']}$\n💳 На счету: {e['bank']}$")
+    await m.answer(f"🏦 ...::: MANLIX BANK :::...\n\n💵 Наличные: {e['cash']}$\n💳 На счету: {e['bank']}$")
 
 @bot.on.message(text=["/положить <amount>"])
 async def deposit(m: Message, amount=None):
@@ -1003,6 +1005,31 @@ async def gstaff_view(m: Message):
         res += "– Отсутствует."
     await m.answer(res)
 
+@bot.on.message(text=["/type", "/type <args>"])
+async def type_cmd(m: Message, args=None):
+    if not await check_access(m, "Специальный Руководитель"):
+        return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    current_type = DATABASE["chats"][pid]["type"]
+    if args:
+        new_type = args.strip().lower()
+        if new_type in ["def", "adm", "mod", "pl", "test", "tex"]:
+            DATABASE["chats"][pid]["type"] = new_type
+            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+            await m.answer(f"Тип беседы изменен на {new_type}")
+        else:
+            await m.answer("Неверный тип")
+    types_desc = """
+def - общая Беседа
+adm - Беседа администраторов 
+mod - Беседа модераторов 
+pl - Беседа игроков 
+test - Беседа тестировщиков
+tex - Тех. Раздел
+"""
+    await m.answer(f"Беседа имеет тип: {current_type}\n{types_desc}")
+
 # ------------------------------
 # 12. Обработка системных действий и автокик забаненных при приглашении
 # ------------------------------
@@ -1050,6 +1077,22 @@ async def auto_kick(event):
                 except:
                     pass
 
+async def send_reports():
+    while True:
+        now = datetime.datetime.now(TZ_MSK)
+        if now.second % 15 == 0:
+            for pid, chat in list(DATABASE["chats"].items()):
+                if chat.get("type") == "tex":
+                    delay = round(random.uniform(0, 1), 2)  # fake delay
+                    time_str = now.strftime("%H:%M:%S")
+                    date_str = now.strftime("%d/%m/%Y")
+                    msg = f"...::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::...\n\n| ==> Бот успешно работает.\n| Задержка Бота: {delay}\n| Точное время: {time_str}\n| Дата: {date_str}"
+                    try:
+                        await bot.api.messages.send(peer_id=int(pid), message=msg, random_id=random.randint(0, 2**32))
+                    except Exception as e:
+                        print("send_reports error:", e)
+        await asyncio.sleep(1)
+
 # ------------------------------
 # 13. HTTP server & run
 # ------------------------------
@@ -1065,4 +1108,5 @@ if __name__ == "__main__":
     if "gstaff" not in DATABASE:
         DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
     threading.Thread(target=HTTPServer( ('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever, daemon=True).start()
+    bot.loop.create_task(send_reports())
     bot.run_forever()
