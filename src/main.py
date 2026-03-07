@@ -203,6 +203,20 @@ async def get_target_id(m: Message, args: str = None):
             pass
     return None
 
+def parse_reason(args: str) -> str:
+    """
+    Извлекает причину из args, пропуская первый токен если это ссылка/id.
+    Используется для /gban, /gbanpl, /ban.
+    """
+    if not args:
+        return "Нарушение"
+    tokens = args.split()
+    if tokens and is_vk_ref(tokens[0]):
+        rest = tokens[1:]
+    else:
+        rest = tokens
+    return " ".join(rest) or "Нарушение"
+
 def parse_mute_args(args: str):
     """
     Корректно разбирает аргументы /mute.
@@ -510,18 +524,20 @@ async def all_buttons(event: MessageEvent):
         if RANK_WEIGHT.get(rank, 0) < 1:
             return await event.show_snackbar("Недостаточно прав")
 
+        # Пустая клавиатура — убирает кнопки после нажатия
+        empty_kb = Keyboard(inline=True).get_json()
+
         if cmd == "unmute_btn":
             if uid in DATABASE["chats"][pid].get("mutes", {}):
                 del DATABASE["chats"][pid]["mutes"][uid]
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
             new_text = f"[id{event.user_id}|Модератор MANLIX] снял(-а) мут [id{uid}|пользователю]"
             try:
-                # Убираем кнопки после снятия мута
                 await bot.api.messages.edit(
                     peer_id=event.peer_id,
                     message=new_text,
                     conversation_message_id=event.conversation_message_id,
-                    keyboard=json.dumps({"inline": True, "buttons": []})
+                    keyboard=empty_kb
                 )
             except Exception as e:
                 print("edit unmute error:", e)
@@ -548,7 +564,7 @@ async def all_buttons(event: MessageEvent):
                     peer_id=event.peer_id,
                     message=new_text,
                     conversation_message_id=event.conversation_message_id,
-                    keyboard=json.dumps({"inline": True, "buttons": []})
+                    keyboard=empty_kb
                 )
             except Exception as e:
                 print("edit clear error:", e)
@@ -834,29 +850,30 @@ async def getban_cmd(m: Message, args=None):
     except:
         name = "пользователь"
 
-    ans = f"Информация о Блокировках [id{t}|пользователя]\n\n"
+    # Строчный регистр в заголовке — требование пользователя
+    ans = f"Информация о блокировках [id{t}|пользователя]\n"
 
     # Глобальный бан в беседах
     if uid in PUNISHMENTS.get("gbans_status", {}):
         b  = PUNISHMENTS["gbans_status"][uid]
         dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
         ans += (
-            f"Информация о общей Блокировке в Беседах:\n"
-            f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n\n"
+            f"\nИнформация о общей блокировке в беседах:\n"
+            f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n"
         )
     else:
-        ans += "Информация о общей Блокировке в Беседах: отсутствует\n\n"
+        ans += "\nИнформация о общей блокировке в беседах: отсутствует\n"
 
     # Глобальный бан в играх
     if uid in PUNISHMENTS.get("gbans_pl", {}):
         b  = PUNISHMENTS["gbans_pl"][uid]
         dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
         ans += (
-            f"Информация о общей Блокировке в Беседе игроков:\n"
-            f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n\n"
+            f"\nИнформация о блокировке в беседах игроков:\n"
+            f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n"
         )
     else:
-        ans += "Информация о общей Блокировке в Беседе игроков: отсутствует\n\n"
+        ans += "\nИнформация о блокировке в беседах игроков: отсутствует\n"
 
     # Локальные баны
     local_bans = []
@@ -867,8 +884,8 @@ async def getban_cmd(m: Message, args=None):
             dt    = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
             local_bans.append(f"{title} | [id{b['admin']}|Модератор MANLIX] | {dt}")
 
-    ans += f"Количество Бесед, в которых заблокирован пользователь: {len(local_bans)}\n"
     if local_bans:
+        ans += f"\nКоличество Бесед, в которых заблокирован пользователь: {len(local_bans)}\n"
         ans += "Информация о последних 10 Блокировках:\n"
         for i, lb in enumerate(local_bans[-10:], 1):
             ans += f"{i}) {lb}\n"
@@ -989,7 +1006,7 @@ async def gban_cmd(m: Message, args=None):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
-    reason = " ".join((args or "").split()[1:]) or "Нарушение"
+    reason = parse_reason(args) or "Нарушение"
     uid    = str(t)
     PUNISHMENTS["gbans_status"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
@@ -1016,7 +1033,7 @@ async def gbanpl_cmd(m: Message, args=None):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
-    reason = " ".join((args or "").split()[1:]) or "Нарушение"
+    reason = parse_reason(args) or "Нарушение"
     uid    = str(t)
     PUNISHMENTS["gbans_pl"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
     for pid_c in list(DATABASE["chats"].keys()):
