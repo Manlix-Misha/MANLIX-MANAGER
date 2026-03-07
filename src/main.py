@@ -173,29 +173,37 @@ def is_vk_ref(token: str) -> bool:
 
 async def get_target_id(m: Message, args: str = None):
     """Получить ID цели из reply, ссылки или первого токена args."""
+    # Приоритет 1: reply на сообщение
     if getattr(m, "reply_message", None):
         return m.reply_message.from_id
     if not args:
         return None
-    tokens = args.split()
-    first  = tokens[0] if tokens else ""
-    # [id123|Имя]
-    match = re.search(r"\[id(\d+)\|", first)
+
+    # Приоритет 2: ищем [id123|...] в ЛЮБОМ месте строки args
+    match = re.search(r"\[id(\d+)\|", args)
     if match:
         return int(match.group(1))
-    # https://vk.com/id123 и https://vk.ru/id123
-    match = re.search(r"vk\.(com|ru)/id(\d+)", first)
+
+    # Приоритет 3: ищем vk.com/id123 или vk.ru/id123 в ЛЮБОМ месте строки
+    match = re.search(r"vk\.(com|ru)/id(\d+)", args)
     if match:
         return int(match.group(2))
+
+    # Приоритет 4: первый токен
+    tokens = args.split()
+    first  = tokens[0] if tokens else ""
+
     # id123
     match = re.match(r"^id(\d+)$", first)
     if match:
         return int(match.group(1))
+
     # Просто число
     if first.isdigit():
         return int(first)
-    # screen_name — только если токен не похож на ссылку
-    if first and not first.startswith("http"):
+
+    # screen_name — только если не похож на ссылку
+    if first and not first.startswith("http") and "/" not in first:
         try:
             res = await bot.api.utils.resolve_screen_name(screen_name=first)
             if res and res.type == "user":
@@ -206,36 +214,28 @@ async def get_target_id(m: Message, args: str = None):
 
 def parse_reason(args: str) -> str:
     """
-    Извлекает причину из args, пропуская первый токен если это ссылка/id.
+    Извлекает причину из args, пропуская все токены-ссылки/id.
     Используется для /gban, /gbanpl, /ban.
     """
     if not args:
         return "Нарушение"
     tokens = args.split()
-    if tokens and is_vk_ref(tokens[0]):
-        rest = tokens[1:]
-    else:
-        rest = tokens
+    # Пропускаем все токены которые являются ссылкой или ID
+    rest = [t for t in tokens if not is_vk_ref(t)]
     return " ".join(rest) or "Нарушение"
 
 def parse_mute_args(args: str):
     """
     Корректно разбирает аргументы /mute.
     Формат: /mute [ссылка/id] [минуты] [причина]
-    Пропускает ссылку/id (первый токен если это ref).
+    Пропускает все токены-ссылки/id.
     Возвращает (mins: int, reason: str).
     """
     if not args:
         return 60, "Нарушение"
     tokens = args.split()
-    idx = 0
-    # Пропускаем токены-ссылки (их может быть несколько если [id123|Имя Фамилия])
-    # Обычно ссылка VK — это один токен вида [id123|Имя] или id123
-    if tokens and is_vk_ref(tokens[0]):
-        idx = 1
-    # Также пропускаем если ссылка содержит пробелы внутри скобок — на всякий случай
-    # собираем остаток
-    remaining = tokens[idx:]
+    # Пропускаем все токены которые являются ссылкой или ID
+    remaining = [t for t in tokens if not is_vk_ref(t)]
     if not remaining:
         return 60, "Нарушение"
     if remaining[0].isdigit():
@@ -504,15 +504,30 @@ async def unmute_cmd(m: Message, args=None):
 # ────────────────────────────────────────────────
 @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=MessageEvent)
 async def all_buttons(event: MessageEvent):
+    # Логируем для диагностики
+    print(f"[BTN] raw payload type={type(event.payload)} value={event.payload!r}")
+
     payload = event.payload
+    # vkbottle может передать payload как dict или как str
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
-        except:
+        except Exception as e:
+            print(f"[BTN] json parse error: {e}")
             return
+    elif not isinstance(payload, dict):
+        # Попробуем получить через object
+        try:
+            payload = dict(payload)
+        except:
+            print(f"[BTN] cannot convert payload to dict: {payload!r}")
+            return
+
     if not isinstance(payload, dict):
         return
+
     cmd = payload.get("cmd")
+    print(f"[BTN] cmd={cmd!r} payload={payload!r}")
     if not cmd:
         return
 
