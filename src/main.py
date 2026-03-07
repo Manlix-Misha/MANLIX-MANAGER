@@ -162,7 +162,8 @@ def is_vk_ref(token: str) -> bool:
     """Проверяет, является ли токен ссылкой/упоминанием/ID пользователя ВК."""
     if re.search(r"\[id\d+\|", token):
         return True
-    if re.search(r"https?://vk\.com/", token):
+    # vk.com и vk.ru — оба домена ВКонтакте
+    if re.search(r"https?://vk\.(com|ru)/", token):
         return True
     if re.match(r"^id\d+$", token):
         return True
@@ -182,10 +183,10 @@ async def get_target_id(m: Message, args: str = None):
     match = re.search(r"\[id(\d+)\|", first)
     if match:
         return int(match.group(1))
-    # https://vk.com/id123
-    match = re.search(r"vk\.com/id(\d+)", first)
+    # https://vk.com/id123 и https://vk.ru/id123
+    match = re.search(r"vk\.(com|ru)/id(\d+)", first)
     if match:
-        return int(match.group(1))
+        return int(match.group(2))
     # id123
     match = re.match(r"^id(\d+)$", first)
     if match:
@@ -193,8 +194,8 @@ async def get_target_id(m: Message, args: str = None):
     # Просто число
     if first.isdigit():
         return int(first)
-    # screen_name
-    if first:
+    # screen_name — только если токен не похож на ссылку
+    if first and not first.startswith("http"):
         try:
             res = await bot.api.utils.resolve_screen_name(screen_name=first)
             if res and res.type == "user":
@@ -477,7 +478,7 @@ async def mute_cmd(m: Message, args=None):
         f"[id{m.from_id}|Модератор MANLIX] выдал(-а) мут [id{t}|пользователю]\n"
         f"Причина: {reason}\n"
         f"Мут выдан до: {dt}",
-        keyboard=kb
+        keyboard=kb.get_json()
     )
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
 
