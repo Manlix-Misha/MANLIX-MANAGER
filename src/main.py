@@ -494,68 +494,77 @@ await m.answer(f”[id{m.from_id}|Модератор MANLIX] снял(-а) му�
 
 # ────────────────────────────────────────────────
 
-# Кнопки мута
+# Единый обработчик кнопок (мут + дуэль)
+
+# ВАЖНО: в vkbottle может быть только ОДИН raw_event обработчик
+
+# одного типа — поэтому мут и дуэль объединены здесь.
 
 # ────────────────────────────────────────────────
 
 @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=MessageEvent)
-async def mute_buttons(event: MessageEvent):
+async def all_buttons(event: MessageEvent):
 payload = event.payload
 if isinstance(payload, str):
 try: payload = json.loads(payload)
 except: return
+if not isinstance(payload, dict):
+return
 cmd = payload.get(“cmd”)
-if cmd not in (“unmute_btn”, “clear_msg”):
+if not cmd:
 return
 
 ```
-uid = payload.get("uid")
-pid = str(event.peer_id)
-ensure_chat(pid)
+# ── Кнопки мута ──────────────────────────────
+if cmd in ("unmute_btn", "clear_msg"):
+    uid = payload.get("uid")
+    pid = str(event.peer_id)
+    ensure_chat(pid)
 
-rank, _ = get_user_info(event.peer_id, event.user_id)
-if RANK_WEIGHT.get(rank, 0) < 1:
-    return await event.show_snackbar("Недостаточно прав")
+    rank, _ = get_user_info(event.peer_id, event.user_id)
+    if RANK_WEIGHT.get(rank, 0) < 1:
+        return await event.show_snackbar("Недостаточно прав")
 
-if cmd == "unmute_btn":
-    if uid and uid in DATABASE["chats"][pid].get("mutes", {}):
-        del DATABASE["chats"][pid]["mutes"][uid]
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    new_text = f"[id{event.user_id}|Модератор MANLIX] снял(-а) мут [id{uid}|пользователю]"
-    try:
-        await bot.api.messages.edit(
-            peer_id=event.peer_id,
-            message=new_text,
-            conversation_message_id=event.conversation_message_id
-        )
-    except Exception as e:
-        print("edit unmute error:", e)
-
-elif cmd == "clear_msg":
-    try:
-        history = await bot.api.messages.get_history(
-            peer_id=event.peer_id,
-            count=50,
-            user_id=int(uid)
-        )
-        ids = [msg.id for msg in history.items if msg.from_id == int(uid)]
-        if ids:
-            await bot.api.messages.delete(
+    if cmd == "unmute_btn":
+        if uid and uid in DATABASE["chats"][pid].get("mutes", {}):
+            del DATABASE["chats"][pid]["mutes"][uid]
+            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        new_text = f"[id{event.user_id}|Модератор MANLIX] снял(-а) мут [id{uid}|пользователю]"
+        try:
+            await bot.api.messages.edit(
                 peer_id=event.peer_id,
-                message_ids=ids,
-                delete_for_all=True
+                message=new_text,
+                conversation_message_id=event.conversation_message_id
             )
-    except Exception as e:
-        print("clear_msg error:", e)
-    new_text = f"[id{event.user_id}|Модератор MANLIX] очистил(-а) сообщения [id{uid}|пользователя]"
-    try:
-        await bot.api.messages.edit(
-            peer_id=event.peer_id,
-            message=new_text,
-            conversation_message_id=event.conversation_message_id
-        )
-    except Exception as e:
-        print("edit clear error:", e)
+        except Exception as e:
+            print("edit unmute error:", e)
+
+    elif cmd == "clear_msg":
+        try:
+            history = await bot.api.messages.get_history(
+                peer_id=event.peer_id,
+                count=50,
+                user_id=int(uid)
+            )
+            ids = [msg.id for msg in history.items if msg.from_id == int(uid)]
+            if ids:
+                await bot.api.messages.delete(
+                    peer_id=event.peer_id,
+                    message_ids=ids,
+                    delete_for_all=True
+                )
+        except Exception as e:
+            print("clear_msg error:", e)
+        new_text = f"[id{event.user_id}|Модератор MANLIX] очистил(-а) сообщения [id{uid}|пользователя]"
+        try:
+            await bot.api.messages.edit(
+                peer_id=event.peer_id,
+                message=new_text,
+                conversation_message_id=event.conversation_message_id
+            )
+        except Exception as e:
+            print("edit clear error:", e)
+    return
 ```
 
 # ────────────────────────────────────────────────
@@ -1212,52 +1221,42 @@ keyboard=kb
 )
 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
 
-# ────────────────────────────────────────────────
-
-# Кнопка дуэли
-
-# ────────────────────────────────────────────────
-
-@bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=MessageEvent)
-async def duel_join(event: MessageEvent):
-payload = event.payload
-if isinstance(payload, str):
-try: payload = json.loads(payload)
-except: return
-if payload.get(“cmd”) != “join_duel”:
-return
-duel_id = payload.get(“duel”)
-if duel_id not in DATABASE.get(“duels”, {}):
-return await event.show_snackbar(“Дуэль уже завершена.”)
-duel = DATABASE[“duels”][duel_id]
-uid  = str(event.user_id)
-if uid in duel[“participants”]:
-return await event.show_snackbar(“Вы уже участвуете.”)
-if len(duel[“participants”]) >= 2:
-return await event.show_snackbar(“Дуэль уже заполнена.”)
-if uid not in ECONOMY or ECONOMY[uid].get(“bank”, 0) < duel[“amount”]:
-return await event.show_snackbar(“Недостаточно средств на банковском счете.”)
-duel[“participants”].append(uid)
-await event.show_snackbar(“Вы вступили в дуэль!”)
-if len(duel[“participants”]) == 2:
-winner = random.choice(duel[“participants”])
-loser  = [p for p in duel[“participants”] if p != winner][0]
-amount = duel[“amount”]
-ECONOMY[winner][“bank”] = ECONOMY[winner].get(“bank”, 0) + amount
-ECONOMY[loser][“bank”]  = ECONOMY[loser].get(“bank”,  0) - amount
-await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-del DATABASE[“duels”][duel_id]
-await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-await bot.api.messages.send(
-peer_id=int(duel[“chat_id”]),
-message=(
-f”⚔️ Дуэль завершена!\n\n”
-f”🏅 Победил: [id{winner}|победитель]\n”
-f”🥈 Проиграл: [id{loser}|проигравший]\n\n”
-f”💲 Победитель получает {amount}$”
-),
-random_id=random.randint(0, 2**31)
-)
+```
+# ── Кнопка дуэли ─────────────────────────────
+if cmd == "join_duel":
+    duel_id = payload.get("duel")
+    if duel_id not in DATABASE.get("duels", {}):
+        return await event.show_snackbar("Дуэль уже завершена.")
+    duel = DATABASE["duels"][duel_id]
+    uid  = str(event.user_id)
+    if uid in duel["participants"]:
+        return await event.show_snackbar("Вы уже участвуете.")
+    if len(duel["participants"]) >= 2:
+        return await event.show_snackbar("Дуэль уже заполнена.")
+    if uid not in ECONOMY or ECONOMY[uid].get("bank", 0) < duel["amount"]:
+        return await event.show_snackbar("Недостаточно средств на банковском счете.")
+    duel["participants"].append(uid)
+    await event.show_snackbar("Вы вступили в дуэль!")
+    if len(duel["participants"]) == 2:
+        winner = random.choice(duel["participants"])
+        loser  = [p for p in duel["participants"] if p != winner][0]
+        amount = duel["amount"]
+        ECONOMY[winner]["bank"] = ECONOMY[winner].get("bank", 0) + amount
+        ECONOMY[loser]["bank"]  = ECONOMY[loser].get("bank",  0) - amount
+        await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+        del DATABASE["duels"][duel_id]
+        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        await bot.api.messages.send(
+            peer_id=int(duel["chat_id"]),
+            message=(
+                f"⚔️ Дуэль завершена!\n\n"
+                f"🏅 Победил: [id{winner}|победитель]\n"
+                f"🥈 Проиграл: [id{loser}|проигравший]\n\n"
+                f"💲 Победитель получает {amount}$"
+            ),
+            random_id=random.randint(0, 2**31)
+        )
+```
 
 # ────────────────────────────────────────────────
 
