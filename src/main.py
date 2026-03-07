@@ -588,16 +588,16 @@ async def staff_view(m: Message):
                 except:
                     pass
                 members.append(f"– [id{u}|{display}]")
-        res += "\n".join(members) if members else "– Отсутствует.\n"
-        res += "\n"
+        res += "\n".join(members) if members else "– Отсутствует."
+        res += "\n\n"  # одна пустая строка между должностями
     await m.answer(res.strip())
 
 @bot.on.message(text=["/setnick", "/setnick <args>"])
 async def setnick(m: Message, args=None):
     if not await check_access(m, "Модератор"): return
-    if not args: return await m.answer("Укажите пользователя и ник")
+    if not args: return await m.answer("Укажите цель и ник")
     parts = args.split(maxsplit=1)
-    if len(parts) < 2: return await m.answer("Укажите пользователя и ник")
+    if len(parts) < 2: return await m.answer("Укажите цель и ник")
     target_token = parts[0]
     new_nick = parts[1].strip()
     t = await get_target_id(m, target_token)
@@ -609,7 +609,7 @@ async def setnick(m: Message, args=None):
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     r, a_nick = get_user_info(m.peer_id, m.from_id)
     a_name = f"[id{m.from_id}|{a_nick or r}]"
-    await m.answer(f"{a_name} установил ник [id{t}|пользователю]: {new_nick}")
+    await m.answer(f"{a_name} установил новое имя [id{t}|пользователю]: {new_nick}")
 
 @bot.on.message(text=["/rnick", "/rnick <args>"])
 async def rnick(m: Message, args=None):
@@ -619,13 +619,11 @@ async def rnick(m: Message, args=None):
     pid, uid = str(m.peer_id), str(t)
     role, _ = get_user_info(m.peer_id, t)
     ensure_chat(pid)
-    if uid in DATABASE["chats"][pid].get("staff", {}):
-        role = DATABASE["chats"][pid]["staff"][uid][0]
-        DATABASE["chats"][pid]["staff"][uid] = [role, None]
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    DATABASE["chats"][pid]["staff"][uid] = [role, None]
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     r, a_nick = get_user_info(m.peer_id, m.from_id)
     a_name = f"[id{m.from_id}|{a_nick or r}]"
-    await m.answer(f"{a_name} снял ник [id{t}|пользователю]")
+    await m.answer(f"{a_name} убрал имя [id{t}|пользователю]")
 
 @bot.on.message(text="/nlist")
 async def nick_list(m: Message):
@@ -637,93 +635,12 @@ async def nick_list(m: Message):
     if users:
         msg = "Список пользователей с ником:\n" + "\n".join(f"{i}. [id{u}|{n}]" for i, (u, n) in enumerate(users, 1))
     else:
-        msg = "Никнеймы не установлены"
+        msg = "Список пользователей с ником:\nОтсутствуют"
     await m.answer(msg)
 
-@bot.on.message(text="/gstaff")
-async def gstaff_view(m: Message):
-    if not await check_access(m, "Зам. Спец. Руководителя"): return
-    g = DATABASE["gstaff"]
-    res = "MANLIX MANAGER | Команда Бота:\n\n"
-    res += "| Специальный Руководитель:\n– [id870757778|Misha Manlix]\n\n"
-    res += "| Основной зам. Спец. Руководителя:\n"
-    if g.get("main_zam"):
-        res += f"– [id{g['main_zam']}|Пользователь]\n"
-    else:
-        res += "– Отсутствует.\n"
-    res += "\n| Зам. Спец. Руководителя:\n"
-    zams = g.get("zams", [])
-    if zams:
-        for z in zams:
-            res += f"– [id{z}|Пользователь]\n"
-    else:
-        res += "– Отсутствует.\n– Отсутствует.\n"
-    await m.answer(res)
-
-@bot.on.message(text="/start")
-async def start(m: Message):
-    if m.from_id != 870757778:
-        return await m.answer("Только Специальный Руководитель может активировать беседу.")
-    pid = str(m.peer_id)
-    ensure_chat(pid)
-    try:
-        conv = await bot.api.messages.get_conversations_by_id(peer_ids=[m.peer_id])
-        if conv.items:
-            DATABASE["chats"][pid]["title"] = conv.items[0].chat_settings.title
-    except:
-        pass
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await m.answer("Беседа успешно активирована.")
-
-@bot.on.message(text=["/type", "/type <args>"])
-async def type_cmd(m: Message, args=None):
-    if not await check_access(m, "Специальный Руководитель"): return
-    pid = str(m.peer_id)
-    ensure_chat(pid)
-    current = DATABASE["chats"][pid]["type"]
-    if args:
-        new_type = args.strip().lower()
-        if new_type in ["def", "adm", "mod", "pl", "test", "tex"]:
-            DATABASE["chats"][pid]["type"] = new_type
-            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            await m.answer(f"Тип беседы изменён на: {new_type}")
-        else:
-            await m.answer("Доступные типы: def, adm, mod, pl, test, tex")
-    types = """
-def   — обычная беседа
-adm   — администраторы
-mod   — модераторы
-pl    — игроки
-test  — тестирование
-tex   — технические отчёты
-"""
-    await m.answer(f"Текущий тип: {current}\n\nДоступные типы:\n{types}")
-
-@bot.on.message(text="/chatid")
-async def chatid(m: Message):
-    if not await check_access(m, "Специальный Руководитель"): return
-    await m.answer(f"ID текущей беседы: {m.peer_id}")
-
-@bot.on.message(text="/delchat")
-async def delchat(m: Message):
-    if not await check_access(m, "Специальный Руководитель"): return
-    pid = str(m.peer_id)
-    if pid in DATABASE["chats"]:
-        del DATABASE["chats"][pid]
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer("Беседа удалена из базы данных.")
-    else:
-        await m.answer("Эта беседа не найдена в базе.")
-
-@bot.on.message(text="/sync")
-async def sync(m: Message):
-    if not await check_access(m, "Специальный Руководитель"): return
-    global DATABASE, ECONOMY, PUNISHMENTS
-    DATABASE    = await load_from_github(GH_PATH_DB,  EXTERNAL_DB)
-    ECONOMY     = await load_from_github(GH_PATH_ECO, EXTERNAL_ECO)
-    PUNISHMENTS = await load_from_github(GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer("База данных синхронизирована.")
-
+# ────────────────────────────────────────────────
+# Глобальные баны
+# ────────────────────────────────────────────────
 @bot.on.message(text=["/gban", "/gban <args>"])
 async def gban_cmd(m: Message, args=None):
     if not await check_access(m, "Специальный Руководитель"): return
@@ -781,28 +698,31 @@ async def getban_cmd(m: Message, args=None):
     if not t: return
     uid = str(t)
     try:
-        uinfo = await bot.api.users.get([t])
-        name = f"{uinfo[0].first_name} {uinfo[0].last_name}"
+        u_info = await bot.api.users.get([t])
+        u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
     except:
-        name = "пользователь"
-    ans = f"Информация о блокировках [id{t}|{name}]:\n\n"
-    for key, label in [("gbans_status", "Глобальный бан бота"), ("gbans_pl", "Глобальный бан в играх")]:
+        u_name = "пользователя"
+    ans = f"Информация о блокировках [id{t}|{u_name}]\n\n"
+    for key, label in [("gbans_status", "общей Блокировке в Беседах"), ("gbans_pl", "общей Блокировке в Беседе игроков")]:
+        ans += f"Информация о {label}: "
         if uid in PUNISHMENTS.get(key, {}):
             b = PUNISHMENTS[key][uid]
-            dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d.%m.%Y %H:%M")
-            ans += f"{label}: Да\nАдмин: [id{b['admin']}|Модератор]\nПричина: {b.get('reason', '-')}\nДата: {dt}\n\n"
+            dt = datetime.datetime.fromtimestamp(b['date'], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
+            ans += f"\n[id{b['admin']}| Модератор MANLIX ] | {b.get('reason', '-')} | {dt}\n\n"
         else:
-            ans += f"{label}: Нет\n\n"
-    local_bans = []
-    for pid, bans in PUNISHMENTS.get("bans", {}).items():
-        if uid in bans:
-            b = bans[uid]
-            title = DATABASE["chats"].get(pid, {}).get("title", f"Беседа {pid}")
-            dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d.%m.%Y %H:%M")
-            local_bans.append(f"{title} | [id{b['admin']}|Модератор] | {b.get('reason', '-')} | {dt}")
-    ans += f"Локальные баны в беседах: {len(local_bans)}\n"
-    if local_bans:
-        ans += "Последние 10:\n" + "\n".join(local_bans[-10:])
+            ans += "отсутствует\n\n"
+    local = []
+    for pid, users in PUNISHMENTS.get("bans", {}).items():
+        if uid in users:
+            b = users[uid]
+            title = DATABASE["chats"].get(pid, {}).get("title", f"Чат {pid}")
+            dt = datetime.datetime.fromtimestamp(b['date'], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
+            local.append(f"{title} | [id{b['admin']}| Модератор MANLIX ] | {b.get('reason', '-')} | {dt}")
+    ans += f"Количество Бесед, в которых заблокирован пользователь: {len(local)}\n"
+    if local:
+        ans += "Информация о последних 10 Блокировках:\n" + "\n".join(f"{i}) {row}" for i, row in enumerate(reversed(local[-10:]), 1))
+    else:
+        ans += "Блокировки в беседах отсутствуют"
     await m.answer(ans)
 
 # ────────────────────────────────────────────────
@@ -1058,7 +978,7 @@ async def auto_kick(event):
                     pass
 
 # ────────────────────────────────────────────────
-# Технические отчёты (только в tex-беседах)
+# Технические отчёты (только в tex)
 # ────────────────────────────────────────────────
 async def send_reports():
     while True:
@@ -1105,11 +1025,6 @@ async def keep_alive():
 # Запуск бота + сервера
 # ────────────────────────────────────────────────
 if __name__ == "__main__":
-    if "chats" not in DATABASE:
-        DATABASE["chats"] = {}
-    if "gstaff" not in DATABASE:
-        DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
-
     # Запуск встроенного HTTP-сервера (обязателен для Render Web Service)
     threading.Thread(
         target=HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), H).serve_forever,
