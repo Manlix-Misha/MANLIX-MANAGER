@@ -336,72 +336,73 @@ async def help_cmd(m: Message):
     w = RANK_WEIGHT.get(rank, 0)
     res = (
         "Команды пользователей:\n"
-        "/info - официальные ресурсы\n"
-        "/stats - статистика пользователя\n"
-        "/getid - оригинальная ссылка VK."
+        "/info -- официальные ресурсы\n"
+        "/stats -- статистика пользователя\n"
+        "/getid -- оригинальная ссылка VK."
     )
     if w >= 1:
         res += (
             "\n\nКоманды для модераторов:\n"
-            "/staff - Руководство Беседы\n"
-            "/kick - исключить пользователя из Беседы.\n"
-            "/mute - выдать Блокировку чата.\n"
-            "/unmute - снять Блокировку чата.\n"
-            "/setnick - установить имя пользователю.\n"
-            "/rnick - удалить имя пользователю.\n"
-            "/nlist - список пользователей с ником.\n"
-            "/getban - информация о Блокировках."
+            "/staff -- Руководство Беседы\n"
+            "/kick -- исключить пользователя из Беседы.\n"
+            "/mute -- выдать Блокировку чата.\n"
+            "/unmute -- снять Блокировку чата.\n"
+            "/setnick -- установить имя пользователю.\n"
+            "/rnick -- удалить имя пользователю.\n"
+            "/nlist -- список пользователей с ником.\n"
+            "/getban -- информация о Блокировках."
         )
     if w >= 2:
         res += (
             "\n\nКоманды старших модераторов:\n"
-            "/addmoder - выдать права модератора.\n"
-            "/removerole - снять уровень прав.\n"
-            "/ban - блокировка пользователя в Беседе.\n"
-            "/unban - снятие блокировки пользователю в беседе."
+            "/addmoder -- выдать права модератора.\n"
+            "/removerole -- снять уровень прав.\n"
+            "/ban -- блокировка пользователя в Беседе.\n"
+            "/unban -- снятие блокировки пользователю в беседе."
         )
     if w >= 3:
         res += (
             "\n\nКоманды администраторов:\n"
-            "/addsenmoder - выдать права старшего модератора."
+            "/addsenmoder -- выдать права старшего модератора."
         )
     if w >= 4:
         res += (
             "\n\nКоманды старших администраторов:\n"
-            "/addadmin - выдать права администратора."
+            "/addadmin -- выдать права администратора."
         )
     if w >= 5:
         res += (
             "\n\nКоманды заместителей спец. администраторов:\n"
-            "/addsenadmin - выдать права старшего модератора."
+            "/addsenadmin -- выдать права старшего модератора."
         )
     if w >= 6:
         res += (
             "\n\nКоманды спец. администраторов:\n"
-            "/addzsa - выдать права заместителя спец. администратора."
+            "/addzsa -- выдать права заместителя спец. администратора."
         )
     if w >= 7:
         res += (
             "\n\nКоманды владельца:\n"
-            "/addsa - выдать права специального администратора."
+            "/addsa -- выдать права специального администратора."
         )
     await m.answer(res)
     if w >= 8:
         gres = (
             "Команды руководства Бота:\n\n"
             "Зам. Спец. Руководителя:\n"
-            "/gstaff - руководство Бота.\n"
-            "/addowner - выдать права владельца.\n"
-            "/gbanpl - Блокировка пользователя во всех игровых Беседах.\n"
-            "/gunbanpl - снятие Блокировки во всех игровых Беседах.\n\n"
+            "/gstaff -- руководство Бота.\n"
+            "/addowner -- выдать права владельца.\n"
+            "/gbanpl -- Блокировка пользователя во всех игровых Беседах.\n"
+            "/gunbanpl -- снятие Блокировки во всех игровых Беседах.\n\n"
             "Основной Зам. Спец. Руководителя:\n"
-            "Отсутствуют.\n\n"
+            "/addzsr -- выдать права заместителя спец. руководителя.\n\n"
             "Спец. Руководителя:\n"
-            "/start - активировать Беседу.\n"
-            "/type - изменить тип Беседы.\n"
-            "/sync - синхронизация с базой данных.\n"
-            "/chatid - узнать айди Беседы.\n"
-            "/delchat - удалить чат с Базы данных."
+            "/addozsr -- выдать права основного заместителя спец. руководителя.\n"
+            "/start -- активировать Беседу.\n"
+            "/type -- изменить тип Беседы.\n"
+            "/sync -- синхронизация с базой данных.\n"
+            "/chatid -- узнать айди Беседы.\n"
+            "/delchat -- удалить чат с Базы данных."
         )
         await m.answer(gres)
 
@@ -502,88 +503,91 @@ async def unmute_cmd(m: Message, args=None):
 # Единый обработчик кнопок (мут + дуэль)
 # ВАЖНО: в vkbottle только ОДИН raw_event одного типа
 # ────────────────────────────────────────────────
+# Пустая inline-клавиатура как JSON-строка для messages.edit
+EMPTY_KB_JSON = '{"inline":true,"buttons":[]}'
+
 @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=MessageEvent)
 async def all_buttons(event: MessageEvent):
-    # Логируем для диагностики
-    print(f"[BTN] raw payload type={type(event.payload)} value={event.payload!r}")
+    payload = event.object.payload if hasattr(event.object, "payload") else event.payload
 
-    payload = event.payload
-    # vkbottle может передать payload как dict или как str
+    # Нормализуем payload -> dict
+    if payload is None:
+        return
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
-        except Exception as e:
-            print(f"[BTN] json parse error: {e}")
-            return
-    elif not isinstance(payload, dict):
-        # Попробуем получить через object
-        try:
-            payload = dict(payload)
         except:
-            print(f"[BTN] cannot convert payload to dict: {payload!r}")
             return
-
     if not isinstance(payload, dict):
-        return
+        try:
+            payload = json.loads(str(payload))
+        except:
+            return
 
     cmd = payload.get("cmd")
-    print(f"[BTN] cmd={cmd!r} payload={payload!r}")
     if not cmd:
         return
 
     # ── Кнопки мута ──────────────────────────────
     if cmd in ("unmute_btn", "clear_msg"):
         uid = str(payload.get("uid", ""))
-        pid = str(event.peer_id)
+        pid = str(event.object.peer_id if hasattr(event.object, "peer_id") else event.peer_id)
+        peer_id = int(pid)
         ensure_chat(pid)
-        rank, _ = get_user_info(event.peer_id, event.user_id)
-        if RANK_WEIGHT.get(rank, 0) < 1:
-            return await event.show_snackbar("Недостаточно прав")
+        actor_id = event.object.user_id if hasattr(event.object, "user_id") else event.user_id
+        cmid = event.object.conversation_message_id if hasattr(event.object, "conversation_message_id") else event.conversation_message_id
 
-        # Пустая клавиатура — убирает кнопки после нажатия
-        empty_kb = Keyboard(inline=True).get_json()
+        rank, _ = get_user_info(peer_id, actor_id)
+        if RANK_WEIGHT.get(rank, 0) < 1:
+            try: await event.show_snackbar("Недостаточно прав")
+            except: pass
+            return
 
         if cmd == "unmute_btn":
             if uid in DATABASE["chats"][pid].get("mutes", {}):
                 del DATABASE["chats"][pid]["mutes"][uid]
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            new_text = f"[id{event.user_id}|Модератор MANLIX] снял(-а) мут [id{uid}|пользователю]"
+            new_text = f"[id{actor_id}|Модератор MANLIX] снял(-а) мут [id{uid}|пользователю]"
             try:
-                await bot.api.messages.edit(
-                    peer_id=event.peer_id,
-                    message=new_text,
-                    conversation_message_id=event.conversation_message_id,
-                    keyboard=empty_kb
-                )
+                await bot.api.request("messages.edit", {
+                    "peer_id": peer_id,
+                    "message": new_text,
+                    "conversation_message_id": cmid,
+                    "keyboard": EMPTY_KB_JSON
+                })
             except Exception as e:
                 print("edit unmute error:", e)
+            try: await event.show_snackbar("Мут снят")
+            except: pass
 
         elif cmd == "clear_msg":
             try:
                 history = await bot.api.messages.get_history(
-                    peer_id=event.peer_id,
+                    peer_id=peer_id,
                     count=50,
                     user_id=int(uid)
                 )
                 ids = [msg.id for msg in history.items if msg.from_id == int(uid)]
                 if ids:
                     await bot.api.messages.delete(
-                        peer_id=event.peer_id,
+                        peer_id=peer_id,
                         message_ids=ids,
                         delete_for_all=True
                     )
             except Exception as e:
                 print("clear_msg error:", e)
-            new_text = f"[id{event.user_id}|Модератор MANLIX] очистил(-а) сообщения [id{uid}|пользователя]"
+            new_text = f"[id{actor_id}|Модератор MANLIX] очистил(-а) сообщения [id{uid}|пользователя]"
             try:
-                await bot.api.messages.edit(
-                    peer_id=event.peer_id,
-                    message=new_text,
-                    conversation_message_id=event.conversation_message_id,
-                    keyboard=empty_kb
-                )
+                await bot.api.request("messages.edit", {
+                    "peer_id": peer_id,
+                    "message": new_text,
+                    "conversation_message_id": cmid,
+                    "keyboard": EMPTY_KB_JSON
+                })
             except Exception as e:
                 print("edit clear error:", e)
+            try: await event.show_snackbar("Сообщения очищены")
+            except: pass
         return
 
     # ── Кнопка дуэли ─────────────────────────────
@@ -723,6 +727,37 @@ async def addsa(m: Message, args=None):
 async def addowner(m: Message, args=None):
     await role_grant(m, args, "Зам. Спец. Руководителя",    "Владелец",                  "владельца")
 
+@bot.on.message(text=["/addzsr", "/addzsr <args>"])
+async def addzsr(m: Message, args=None):
+    """Выдать права Зам. Спец. Руководителя — только Основной Зам. или Спец. Руководитель."""
+    if not await check_access(m, "Основной Зам. Спец. Руководителя"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя.")
+    uid = str(t)
+    gstaff = DATABASE["gstaff"]
+    if "zams" not in gstaff:
+        gstaff["zams"] = []
+    if t not in gstaff["zams"]:
+        gstaff["zams"].append(t)
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    _, a_nick = get_user_info(m.peer_id, m.from_id)
+    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [id{t}|пользователю]")
+
+@bot.on.message(text=["/addozsr", "/addozsr <args>"])
+async def addozsr(m: Message, args=None):
+    """Выдать права Основного Зам. Спец. Руководителя — только Спец. Руководитель."""
+    if not await check_access(m, "Специальный Руководитель"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя.")
+    DATABASE["gstaff"]["main_zam"] = t
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    _, a_nick = get_user_info(m.peer_id, m.from_id)
+    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя специального руководителя [id{t}|пользователю]")
+
 # ────────────────────────────────────────────────
 # /removerole
 # ────────────────────────────────────────────────
@@ -760,7 +795,6 @@ async def staff_view(m: Message):
     ]
     blocks = []
     for r in order:
-        block   = f"{r}:"
         members = []
         for u, entry in staff.items():
             if entry[0] == r:
@@ -774,7 +808,16 @@ async def staff_view(m: Message):
                     except:
                         display = "пользователь"
                 members.append(f"– [id{u}|{display}]")
-        block += "\n" + ("\n".join(members) if members else "– Отсутствует.")
+        if r == "Владелец":
+            # Владелец — первая строка всегда бот MANLIX MANAGER
+            group_id = DATABASE.get("group_id", "")
+            bot_line = f"Владелец -- [club{group_id}|MANLIX MANAGER]" if group_id else "Владелец -- MANLIX MANAGER"
+            if members:
+                block = bot_line + "\n" + "\n".join(members)
+            else:
+                block = bot_line
+        else:
+            block = f"{r}:\n" + ("\n".join(members) if members else "– Отсутствует.")
         blocks.append(block)
     await m.answer("\n\n".join(blocks))
 
@@ -939,6 +982,7 @@ async def gstaff_view(m: Message):
 @bot.on.message(text="/start")
 async def start(m: Message):
     if not await check_access(m, "Специальный Руководитель"): return
+    global GROUP_ID
     pid = str(m.peer_id)
     ensure_chat(pid)
     try:
@@ -947,6 +991,14 @@ async def start(m: Message):
             DATABASE["chats"][pid]["title"] = conv.items[0].chat_settings.title
     except:
         pass
+    # Сохраняем group_id для /staff
+    if GROUP_ID is None:
+        try:
+            grp = await bot.api.groups.get_by_id()
+            GROUP_ID = grp[0].id
+            DATABASE["group_id"] = GROUP_ID
+        except:
+            pass
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer("Вы успешно активировали Беседу.")
 
@@ -1026,7 +1078,7 @@ async def gban_cmd(m: Message, args=None):
     uid    = str(t)
     PUNISHMENTS["gbans_status"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] занес [id{t}|пользователя] в глобальную Блокировку Бота.")
+    await m.answer(f"[id{m.from_id}|Специальный Руководитель] занес(-ла) [id{t}|пользователя] в глобальную Блокировку Бота.")
 
 @bot.on.message(text=["/gunban", "/gunban <args>"])
 async def gunban(m: Message, args=None):
@@ -1038,7 +1090,7 @@ async def gunban(m: Message, args=None):
     if uid in PUNISHMENTS["gbans_status"]:
         del PUNISHMENTS["gbans_status"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] вынес [id{t}|пользователя] из Глобальной Блокировки Бота.")
+    await m.answer(f"[id{m.from_id}|Специальный Руководитель] вынес(-ла) [id{t}|пользователя] из Глобальной Блокировки Бота.")
 
 # ────────────────────────────────────────────────
 # /gbanpl / /gunbanpl
@@ -1060,7 +1112,7 @@ async def gbanpl_cmd(m: Message, args=None):
             except:
                 pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] заблокировал [id{t}|пользователя] во всех игровых Беседах.")
+    await m.answer(f"[id{m.from_id}|Специальный Руководитель] заблокировал(-а) [id{t}|пользователя] во всех игровых Беседах.")
 
 @bot.on.message(text=["/gunbanpl", "/gunbanpl <args>"])
 async def gunbanpl_cmd(m: Message, args=None):
@@ -1072,7 +1124,7 @@ async def gunbanpl_cmd(m: Message, args=None):
     if uid in PUNISHMENTS["gbans_pl"]:
         del PUNISHMENTS["gbans_pl"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] разблокировал [id{t}|пользователя] во всех игровых Беседах.")
+    await m.answer(f"[id{m.from_id}|Специальный Руководитель] разблокировал(-а) [id{t}|пользователя] во всех игровых Беседах.")
 
 # ────────────────────────────────────────────────
 # Игровые команды
