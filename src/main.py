@@ -269,6 +269,12 @@ def get_user_info(peer_id, user_id):
     return role, nick
 
 async def get_display_name(user_id: int, peer_id=None, use_nick=True):
+    """
+    Возвращает отображаемое имя пользователя:
+    1. Ник из бота (если установлен через /setnick и use_nick=True)
+    2. Имя и фамилия из профиля ВК
+    3. Fallback: "пользователь"
+    """
     if use_nick and peer_id:
         _, nick = get_user_info(peer_id, user_id)
         if nick:
@@ -515,34 +521,52 @@ EMPTY_KB_JSON = '{"inline":true,"buttons":[]}'
 
 @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=MessageEvent)
 async def all_buttons(event: MessageEvent):
-    payload = event.object.payload if hasattr(event.object, "payload") else event.payload
+    # ── Извлекаем все поля максимально надёжно ──
+    def _get(obj, *attrs, default=None):
+        for a in attrs:
+            try:
+                v = getattr(obj, a, None)
+                if v is not None:
+                    return v
+            except:
+                pass
+        return default
 
-    # Нормализуем payload -> dict
-    if payload is None:
+    # peer_id, user_id, cmid
+    peer_id  = _get(event, "peer_id") or _get(event.object if hasattr(event, "object") else event, "peer_id", default=0)
+    actor_id = _get(event, "user_id") or _get(event.object if hasattr(event, "object") else event, "user_id", default=0)
+    cmid     = _get(event, "conversation_message_id") or _get(event.object if hasattr(event, "object") else event, "conversation_message_id", default=0)
+
+    # payload
+    raw_payload = _get(event, "payload") or _get(event.object if hasattr(event, "object") else event, "payload")
+    if raw_payload is None:
         return
-    if isinstance(payload, str):
+    if isinstance(raw_payload, dict):
+        payload = raw_payload
+    elif isinstance(raw_payload, str):
         try:
-            payload = json.loads(payload)
+            payload = json.loads(raw_payload)
         except:
             return
+    else:
+        try:
+            payload = json.loads(str(raw_payload))
+        except:
+            return
+
     if not isinstance(payload, dict):
-        try:
-            payload = json.loads(str(payload))
-        except:
-            return
+        return
 
     cmd = payload.get("cmd")
     if not cmd:
         return
 
+    pid = str(peer_id)
+
     # ── Кнопки мута ──────────────────────────────
     if cmd in ("unmute_btn", "clear_msg"):
         uid = str(payload.get("uid", ""))
-        pid = str(event.object.peer_id if hasattr(event.object, "peer_id") else event.peer_id)
-        peer_id = int(pid)
         ensure_chat(pid)
-        actor_id = event.object.user_id if hasattr(event.object, "user_id") else event.user_id
-        cmid = event.object.conversation_message_id if hasattr(event.object, "conversation_message_id") else event.conversation_message_id
 
         rank, _ = get_user_info(peer_id, actor_id)
         if RANK_WEIGHT.get(rank, 0) < 1:
@@ -603,7 +627,7 @@ async def all_buttons(event: MessageEvent):
         if duel_id not in DATABASE.get("duels", {}):
             return await event.show_snackbar("Дуэль уже завершена.")
         duel = DATABASE["duels"][duel_id]
-        uid  = str(event.user_id)
+        uid  = str(actor_id)
         if uid in duel["participants"]:
             return await event.show_snackbar("Вы уже участвуете.")
         if len(duel["participants"]) >= 2:
@@ -721,8 +745,7 @@ async def role_grant(m: Message, args, min_rank, role_name, role_label):
     pid, uid  = str(m.peer_id), str(t)
     await set_role_in_chat(pid, uid, role_name)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    _, a_nick = get_user_info(m.peer_id, m.from_id)
-    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|пользователю]")
 
 @bot.on.message(text=["/addmoder",    "/addmoder <args>"])
@@ -769,8 +792,7 @@ async def addzsr(m: Message, args=None):
     if t not in gstaff["zams"]:
         gstaff["zams"].append(t)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    _, a_nick = get_user_info(m.peer_id, m.from_id)
-    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [id{t}|пользователю]")
 
 @bot.on.message(text=["/addozsr", "/addozsr <args>"])
@@ -784,8 +806,7 @@ async def addozsr(m: Message, args=None):
         return await m.answer("Вы не можете выдать роль данному пользователю!")
     DATABASE["gstaff"]["main_zam"] = t
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    _, a_nick = get_user_info(m.peer_id, m.from_id)
-    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя специального руководителя [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
@@ -802,8 +823,7 @@ async def removerole(m: Message, args=None):
     if uid in DATABASE["chats"][pid].get("staff", {}):
         del DATABASE["chats"][pid]["staff"][uid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    _, a_nick = get_user_info(m.peer_id, m.from_id)
-    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
@@ -834,8 +854,7 @@ async def gunrole_cmd(m: Message, args=None):
     if not removed:
         return await m.answer("У этого пользователя нет глобальных прав.")
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    _, a_nick = get_user_info(m.peer_id, m.from_id)
-    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
@@ -871,9 +890,17 @@ async def staff_view(m: Message):
                         display = "пользователь"
                 members.append(f"– [id{u}|{display}]")
         if r == "Владелец":
-            # Строка Владелец ВСЕГДА: "Владелец -- MANLIX MANAGER"
-            # Никакой group_id, никаких условий — просто фиксированная строка
-            block = "Владелец -- MANLIX MANAGER"
+            # Ищем владельцев в staff беседы
+            owner_ids = [u for u, entry in staff.items() if entry[0] == "Владелец"]
+            if owner_ids:
+                # Первый владелец — главная строка со ссылкой + ник MANLIX MANAGER
+                block = f"Владелец -- [id{owner_ids[0]}|MANLIX MANAGER]"
+                # Если владельцев несколько — остальные ниже
+                for oid in owner_ids[1:]:
+                    block += f"\n– [id{oid}|MANLIX MANAGER]"
+            else:
+                # Нет ни одного владельца — просто текст
+                block = "Владелец -- MANLIX MANAGER"
         else:
             if members:
                 block = f"{r}: \n" + "\n".join(members)
@@ -913,8 +940,7 @@ async def setnick(m: Message, args=None):
     role_now, _ = get_user_info(m.peer_id, t)
     DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    _, a_nick = get_user_info(m.peer_id, m.from_id)
-    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
 
 # ────────────────────────────────────────────────
@@ -933,8 +959,7 @@ async def rnick(m: Message, args=None):
     if uid in DATABASE["chats"][pid].get("staff", {}):
         DATABASE["chats"][pid]["staff"][uid][1] = None
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    _, a_nick = get_user_info(m.peer_id, m.from_id)
-    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
