@@ -179,7 +179,9 @@ def is_vk_ref(token: str) -> bool:
         return True
     if re.match(r"^id\d+$", token):
         return True
-    if re.match(r"^\d+$", token):
+    # Просто число считается ID только если достаточно большое (> 1000)
+    # чтобы не путать с числами в причине ("пункт 1", "нарушение 3")
+    if re.match(r"^\d+$", token) and int(token) > 1000:
         return True
     return False
 
@@ -534,26 +536,76 @@ EMPTY_KB_JSON = '{"inline":true,"buttons":[]}'
 
 @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=MessageEvent)
 async def all_buttons(event: MessageEvent):
-    # ── Извлекаем все поля максимально надёжно ──
-    def _get(obj, *attrs, default=None):
-        for a in attrs:
+    # ── Надёжное извлечение данных из MessageEvent ──
+    try:
+        obj = event.object
+    except:
+        obj = event
+
+    # Извлекаем peer_id
+    peer_id = None
+    for src in (obj, event):
+        for attr in ("peer_id",):
             try:
-                v = getattr(obj, a, None)
+                v = getattr(src, attr, None)
+                if v:
+                    peer_id = int(v)
+                    break
+            except: pass
+        if peer_id: break
+
+    # Извлекаем user_id (кто нажал кнопку)
+    actor_id = None
+    for src in (obj, event):
+        for attr in ("user_id",):
+            try:
+                v = getattr(src, attr, None)
+                if v:
+                    actor_id = int(v)
+                    break
+            except: pass
+        if actor_id: break
+
+    # Извлекаем conversation_message_id
+    cmid = None
+    for src in (obj, event):
+        for attr in ("conversation_message_id",):
+            try:
+                v = getattr(src, attr, None)
+                if v:
+                    cmid = int(v)
+                    break
+            except: pass
+        if cmid: break
+
+    # Извлекаем event_id (нужен для send_message_event_answer)
+    event_id = None
+    for src in (obj, event):
+        for attr in ("event_id",):
+            try:
+                v = getattr(src, attr, None)
+                if v:
+                    event_id = str(v)
+                    break
+            except: pass
+        if event_id: break
+
+    # Извлекаем payload
+    raw_payload = None
+    for src in (obj, event):
+        for attr in ("payload",):
+            try:
+                v = getattr(src, attr, None)
                 if v is not None:
-                    return v
-            except:
-                pass
-        return default
+                    raw_payload = v
+                    break
+            except: pass
+        if raw_payload is not None: break
 
-    # peer_id, user_id, cmid
-    peer_id  = _get(event, "peer_id") or _get(event.object if hasattr(event, "object") else event, "peer_id", default=0)
-    actor_id = _get(event, "user_id") or _get(event.object if hasattr(event, "object") else event, "user_id", default=0)
-    cmid     = _get(event, "conversation_message_id") or _get(event.object if hasattr(event, "object") else event, "conversation_message_id", default=0)
-
-    # payload
-    raw_payload = _get(event, "payload") or _get(event.object if hasattr(event, "object") else event, "payload")
-    if raw_payload is None:
+    if raw_payload is None or peer_id is None or actor_id is None:
         return
+
+    # Нормализуем payload -> dict
     if isinstance(raw_payload, dict):
         payload = raw_payload
     elif isinstance(raw_payload, str):
@@ -576,6 +628,18 @@ async def all_buttons(event: MessageEvent):
 
     pid = str(peer_id)
 
+    # Вспомогательная функция для snackbar
+    async def snackbar(text: str):
+        try:
+            await bot.api.messages.send_message_event_answer(
+                event_id=event_id,
+                user_id=actor_id,
+                peer_id=peer_id,
+                event_data=json.dumps({"type": "show_snackbar", "text": text})
+            )
+        except Exception as e:
+            print("snackbar error:", e)
+
     # ── Кнопки мута ──────────────────────────────
     if cmd in ("unmute_btn", "clear_msg"):
         uid = str(payload.get("uid", ""))
@@ -583,8 +647,7 @@ async def all_buttons(event: MessageEvent):
 
         rank, _ = get_user_info(peer_id, actor_id)
         if RANK_WEIGHT.get(rank, 0) < 1:
-            try: await event.show_snackbar("Недостаточно прав")
-            except: pass
+            await snackbar("Недостаточно прав")
             return
 
         if cmd == "unmute_btn":
@@ -601,8 +664,7 @@ async def all_buttons(event: MessageEvent):
                 })
             except Exception as e:
                 print("edit unmute error:", e)
-            try: await event.show_snackbar("Мут снят")
-            except: pass
+            await snackbar("Мут снят")
 
         elif cmd == "clear_msg":
             try:
@@ -630,25 +692,28 @@ async def all_buttons(event: MessageEvent):
                 })
             except Exception as e:
                 print("edit clear error:", e)
-            try: await event.show_snackbar("Сообщения очищены")
-            except: pass
+            await snackbar("Сообщения очищены")
         return
 
     # ── Кнопка дуэли ─────────────────────────────
     if cmd == "join_duel":
         duel_id = payload.get("duel")
         if duel_id not in DATABASE.get("duels", {}):
-            return await event.show_snackbar("Дуэль уже завершена.")
+            await snackbar("Дуэль уже завершена.")
+            return
         duel = DATABASE["duels"][duel_id]
         uid  = str(actor_id)
         if uid in duel["participants"]:
-            return await event.show_snackbar("Вы уже участвуете.")
+            await snackbar("Вы уже участвуете.")
+            return
         if len(duel["participants"]) >= 2:
-            return await event.show_snackbar("Дуэль уже заполнена.")
+            await snackbar("Дуэль уже заполнена.")
+            return
         if uid not in ECONOMY or ECONOMY[uid].get("bank", 0) < duel["amount"]:
-            return await event.show_snackbar("Недостаточно средств на банковском счете.")
+            await snackbar("Недостаточно средств на банковском счете.")
+            return
         duel["participants"].append(uid)
-        await event.show_snackbar("Вы вступили в дуэль!")
+        await snackbar("Вы вступили в дуэль!")
         if len(duel["participants"]) == 2:
             winner = random.choice(duel["participants"])
             loser  = [p for p in duel["participants"] if p != winner][0]
