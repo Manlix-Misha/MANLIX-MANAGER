@@ -871,37 +871,9 @@ async def staff_view(m: Message):
                         display = "пользователь"
                 members.append(f"– [id{u}|{display}]")
         if r == "Владелец":
-            # Находим первого владельца и делаем его ссылкой вместо "MANLIX MANAGER"
-            owner_entries = [(u, entry) for u, entry in staff.items() if entry[0] == "Владелец"]
-            if owner_entries:
-                # Берём первого владельца как главного
-                first_u, first_entry = owner_entries[0]
-                nick = first_entry[1]
-                if nick:
-                    owner_display = nick
-                else:
-                    try:
-                        uinfo = await bot.api.users.get([int(first_u)])
-                        owner_display = f"{uinfo[0].first_name} {uinfo[0].last_name}"
-                    except:
-                        owner_display = "MANLIX MANAGER"
-                block = f"Владелец -- [id{first_u}|{owner_display}]"
-                # Остальные владельцы идут строками ниже
-                for u, entry in owner_entries[1:]:
-                    nick = entry[1]
-                    if nick:
-                        d = nick
-                    else:
-                        try:
-                            uinfo = await bot.api.users.get([int(u)])
-                            d = f"{uinfo[0].first_name} {uinfo[0].last_name}"
-                        except:
-                            d = "пользователь"
-                    block += f"\n– [id{u}|{d}]"
-            else:
-                # Нет владельцев — показываем бота
-                group_id = DATABASE.get("group_id", "")
-                block = f"Владелец -- [club{group_id}|MANLIX MANAGER]" if group_id else "Владелец -- MANLIX MANAGER"
+            # Строка Владелец ВСЕГДА: "Владелец -- MANLIX MANAGER"
+            # Никакой group_id, никаких условий — просто фиксированная строка
+            block = "Владелец -- MANLIX MANAGER"
         else:
             if members:
                 block = f"{r}: \n" + "\n".join(members)
