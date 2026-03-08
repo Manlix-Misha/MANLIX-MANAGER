@@ -391,6 +391,7 @@ async def help_cmd(m: Message):
             "Команды руководства Бота:\n\n"
             "Зам. Спец. Руководителя:\n"
             "/gstaff -- руководство Бота.\n"
+            "/gunrole -- снятие глобальных уровней прав.\n"
             "/addowner -- выдать права владельца.\n"
             "/gbanpl -- Блокировка пользователя во всех игровых Беседах.\n"
             "/gunbanpl -- снятие Блокировки во всех игровых Беседах.\n\n"
@@ -465,6 +466,12 @@ async def mute_cmd(m: Message, args=None):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Вы не можете исключать этого пользователя")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Вы не можете исключать этого пользователя")
     mins, reason = parse_mute_args(args)
     until = time.time() + mins * 60
     pid   = str(m.peer_id)
@@ -634,6 +641,13 @@ async def kick_cmd(m: Message, args=None):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Вы не можете исключать этого пользователя")
+    # Проверка на ранг цели
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Вы не можете исключать этого пользователя")
     try:
         chat_id = m.peer_id - 2000000000
         await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
@@ -650,6 +664,12 @@ async def ban_cmd(m: Message, args=None):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Вы не можете исключать этого пользователя")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Вы не можете исключать этого пользователя")
     parts  = (args or "").split()
     reason = " ".join(parts[1:]) or "Нарушение"
     pid    = str(m.peer_id)
@@ -692,6 +712,12 @@ async def role_grant(m: Message, args, min_rank, role_name, role_label):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Вы не можете выдать роль данному пользователю!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Вы не можете выдать роль данному пользователю!")
     pid, uid  = str(m.peer_id), str(t)
     await set_role_in_chat(pid, uid, role_name)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
@@ -734,6 +760,8 @@ async def addzsr(m: Message, args=None):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Вы не можете выдать роль данному пользователю!")
     uid = str(t)
     gstaff = DATABASE["gstaff"]
     if "zams" not in gstaff:
@@ -752,6 +780,8 @@ async def addozsr(m: Message, args=None):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Вы не можете выдать роль данному пользователю!")
     DATABASE["gstaff"]["main_zam"] = t
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     _, a_nick = get_user_info(m.peer_id, m.from_id)
@@ -775,6 +805,38 @@ async def removerole(m: Message, args=None):
     _, a_nick = get_user_info(m.peer_id, m.from_id)
     a_display = a_nick if a_nick else await get_display_name(m.from_id)
     await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|пользователю]")
+
+# ────────────────────────────────────────────────
+# /gunrole — снять глобальную роль (зам, основной зам)
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/gunrole", "/gunrole <args>"])
+async def gunrole_cmd(m: Message, args=None):
+    if not await check_access(m, "Зам. Спец. Руководителя"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Нельзя снимать права у самого себя.")
+    gstaff = DATABASE["gstaff"]
+    removed = False
+    # Снимаем из зам. спец. руководителей
+    if t in gstaff.get("zams", []):
+        gstaff["zams"].remove(t)
+        removed = True
+    # Снимаем основного зама (только Спец. Руководитель)
+    if gstaff.get("main_zam") == t:
+        rank, _ = get_user_info(m.peer_id, m.from_id)
+        if RANK_WEIGHT.get(rank, 0) >= 10:
+            gstaff["main_zam"] = None
+            removed = True
+        else:
+            return await m.answer("Снять Основного Зам. может только Специальный Руководитель.")
+    if not removed:
+        return await m.answer("У этого пользователя нет глобальных прав.")
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    _, a_nick = get_user_info(m.peer_id, m.from_id)
+    a_display = a_nick if a_nick else await get_display_name(m.from_id)
+    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # /staff
@@ -809,15 +871,42 @@ async def staff_view(m: Message):
                         display = "пользователь"
                 members.append(f"– [id{u}|{display}]")
         if r == "Владелец":
-            # Владелец — первая строка всегда бот MANLIX MANAGER
-            group_id = DATABASE.get("group_id", "")
-            bot_line = f"Владелец -- [club{group_id}|MANLIX MANAGER]" if group_id else "Владелец -- MANLIX MANAGER"
-            if members:
-                block = bot_line + "\n" + "\n".join(members)
+            # Находим первого владельца и делаем его ссылкой вместо "MANLIX MANAGER"
+            owner_entries = [(u, entry) for u, entry in staff.items() if entry[0] == "Владелец"]
+            if owner_entries:
+                # Берём первого владельца как главного
+                first_u, first_entry = owner_entries[0]
+                nick = first_entry[1]
+                if nick:
+                    owner_display = nick
+                else:
+                    try:
+                        uinfo = await bot.api.users.get([int(first_u)])
+                        owner_display = f"{uinfo[0].first_name} {uinfo[0].last_name}"
+                    except:
+                        owner_display = "MANLIX MANAGER"
+                block = f"Владелец -- [id{first_u}|{owner_display}]"
+                # Остальные владельцы идут строками ниже
+                for u, entry in owner_entries[1:]:
+                    nick = entry[1]
+                    if nick:
+                        d = nick
+                    else:
+                        try:
+                            uinfo = await bot.api.users.get([int(u)])
+                            d = f"{uinfo[0].first_name} {uinfo[0].last_name}"
+                        except:
+                            d = "пользователь"
+                    block += f"\n– [id{u}|{d}]"
             else:
-                block = bot_line
+                # Нет владельцев — показываем бота
+                group_id = DATABASE.get("group_id", "")
+                block = f"Владелец -- [club{group_id}|MANLIX MANAGER]" if group_id else "Владелец -- MANLIX MANAGER"
         else:
-            block = f"{r}:\n" + ("\n".join(members) if members else "– Отсутствует.")
+            if members:
+                block = f"{r}: \n" + "\n".join(members)
+            else:
+                block = f"{r}: \n– Отсутствует."
         blocks.append(block)
     await m.answer("\n\n".join(blocks))
 
@@ -1078,7 +1167,7 @@ async def gban_cmd(m: Message, args=None):
     uid    = str(t)
     PUNISHMENTS["gbans_status"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] занес(-ла) [id{t}|пользователя] в глобальную Блокировку Бота.")
+    await m.answer(f"[id{m.from_id}|Специальный Руководитель] занес [id{t}|пользователя] в глобальную Блокировку Бота.")
 
 @bot.on.message(text=["/gunban", "/gunban <args>"])
 async def gunban(m: Message, args=None):
@@ -1090,7 +1179,7 @@ async def gunban(m: Message, args=None):
     if uid in PUNISHMENTS["gbans_status"]:
         del PUNISHMENTS["gbans_status"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] вынес(-ла) [id{t}|пользователя] из Глобальной Блокировки Бота.")
+    await m.answer(f"[id{m.from_id}|Специальный Руководитель] вынес [id{t}|пользователя] из Глобальной Блокировки Бота.")
 
 # ────────────────────────────────────────────────
 # /gbanpl / /gunbanpl
