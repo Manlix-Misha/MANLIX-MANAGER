@@ -29,6 +29,9 @@ TZ_MSK = datetime.timezone(datetime.timedelta(hours=3))
 
 RANK_WEIGHT = {
     "Пользователь":                     0,
+    "Тестировщик":                      1,
+    "Старший Тестировщик":              2,
+    "Главный Тестировщик":              3,
     "Модератор":                        1,
     "Старший Модератор":                2,
     "Администратор":                    3,
@@ -39,6 +42,13 @@ RANK_WEIGHT = {
     "Зам. Спец. Руководителя":          8,
     "Основной Зам. Спец. Руководителя": 9,
     "Специальный Руководитель":        10
+}
+
+# Веса ролей тестировщиков отдельно
+TESTER_RANK_WEIGHT = {
+    "Тестировщик":        1,
+    "Старший Тестировщик": 2,
+    "Главный Тестировщик": 3,
 }
 
 # ────────────────────────────────────────────────
@@ -133,6 +143,8 @@ if "gstaff" not in DATABASE:
     DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
 if "duels" not in DATABASE:
     DATABASE["duels"] = {}
+if "testers" not in DATABASE:
+    DATABASE["testers"] = {}
 
 GROUP_ID = None
 
@@ -402,7 +414,8 @@ async def help_cmd(m: Message):
             "/gbanpl -- Блокировка пользователя во всех игровых Беседах.\n"
             "/gunbanpl -- снятие Блокировки во всех игровых Беседах.\n\n"
             "Основной Зам. Спец. Руководителя:\n"
-            "/addzsr -- выдать права заместителя спец. руководителя.\n\n"
+            "/addzsr -- выдать права заместителя спец. руководителя.\n"
+            "/thelp -- список команд для тестировщиков.\n\n"
             "Спец. Руководителя:\n"
             "/addozsr -- выдать права основного заместителя спец. руководителя.\n"
             "/start -- активировать Беседу.\n"
@@ -1096,7 +1109,7 @@ async def type_cmd(m: Message, args=None):
     if not await check_access(m, "Специальный Руководитель"): return
     pid   = str(m.peer_id)
     ensure_chat(pid)
-    valid = ["def", "adm", "mod", "pl", "test", "tex"]
+    valid = ["def", "adm", "mod", "pl", "test", "tex", "bug"]
     if args:
         new_type = args.strip().lower()
         if new_type in valid:
@@ -1114,7 +1127,8 @@ async def type_cmd(m: Message, args=None):
         "mod - Беседа модераторов\n"
         "pl - Беседа игроков\n"
         "test - Беседа тестировщиков\n"
-        "tex - Тех. Раздел"
+        "tex - Тех. Раздел\n"
+        "bug - Баг-трекер"
     )
 
 # ────────────────────────────────────────────────
@@ -1211,6 +1225,147 @@ async def gunbanpl_cmd(m: Message, args=None):
         del PUNISHMENTS["gbans_pl"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] разблокировал(-а) [id{t}|пользователя] во всех игровых Беседах.")
+
+# ────────────────────────────────────────────────
+# Система тестировщиков
+# ────────────────────────────────────────────────
+
+def get_tester_info(user_id: int):
+    """Возвращает (роль_тестировщика, кол-во_багов) или (None, 0)."""
+    uid = str(user_id)
+    entry = DATABASE.get("testers", {}).get(uid)
+    if entry:
+        return entry.get("role"), entry.get("bugs", 0)
+    return None, 0
+
+async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_label):
+    """Выдача ролей тестировщиков."""
+    t_role, _ = get_tester_info(m.from_id)
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    # Доступ: нужная роль тестировщика ИЛИ глобальный ранг >= ЗСР
+    has_access = (
+        TESTER_RANK_WEIGHT.get(t_role, 0) >= TESTER_RANK_WEIGHT.get(min_tester_role, 0)
+        or RANK_WEIGHT.get(my_global, 0) >= 8
+    )
+    if not has_access:
+        return await m.answer("Недостаточно прав!")
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Вы не можете выдать роль данному пользователю!")
+    uid = str(t)
+    if uid not in DATABASE["testers"]:
+        DATABASE["testers"][uid] = {"role": role_name, "bugs": 0, "joined": time.time()}
+    else:
+        DATABASE["testers"][uid]["role"] = role_name
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|пользователю]")
+
+@bot.on.message(text="/thelp")
+async def thelp_cmd(m: Message):
+    # Доступна только тестировщикам и глобальному руководству (ЗСР+)
+    t_role, _ = get_tester_info(m.from_id)
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    if not t_role and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Недостаточно прав!")
+    await m.answer(
+        "Команды тестировщиков:\n"
+        "/tstats -- статистика тестировщика.\n"
+        "/bug -- отчет багов.\n\n"
+        "Команды старших тестировщиков:\n"
+        "Отсутствуют.\n\n"
+        "Команды главного тестировщика:\n"
+        "/addtester -- выдать права тестировщика.\n"
+        "/addsentester -- выдать права старшего тестировщика.\n\n"
+        "Команды спец. Руководства:\n"
+        "/addgt -- выдать права главного тестировщика.\n"
+        "/type test -- сменить тип беседы, на беседу тестировщиков.\n"
+        "/type bug -- сменить тип беседы, на Баг-трекер."
+    )
+
+@bot.on.message(text=["/tstats", "/tstats <args>"])
+async def tstats_cmd(m: Message, args=None):
+    t = await get_target_id(m, args) or m.from_id
+    uid = str(t)
+    role, bugs = get_tester_info(t)
+    if not role:
+        return await m.answer(f"[id{t}|пользователь] не является тестировщиком.")
+    now = datetime.datetime.now(TZ_MSK)
+    await m.answer(
+        f"Статистика [id{t}|тестировщика]\n\n"
+        f"Должность: {role}\n"
+        f"Отправлено Багов: {bugs}\n\n"
+        f"Дата: {now.strftime('%d/%m/%Y')}\n"
+        f"Время: {now.strftime('%H:%M:%S')}"
+    )
+
+@bot.on.message(text=["/bug", "/bug <args>"])
+async def bug_cmd(m: Message, args=None):
+    role, _ = get_tester_info(m.from_id)
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    if not role and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Недостаточно прав!")
+    uid = str(m.from_id)
+    if uid not in DATABASE["testers"]:
+        DATABASE["testers"][uid] = {"role": role or "Тестировщик", "bugs": 0, "joined": time.time()}
+    DATABASE["testers"][uid]["bugs"] = DATABASE["testers"][uid].get("bugs", 0) + 1
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    bug_text = (args or "").strip()
+
+    # Подтверждение тестировщику
+    await m.answer(f"[id{m.from_id}|{a_display}] отправил отчет с Багами.")
+
+    # Формируем репорт
+    now = datetime.datetime.now(TZ_MSK)
+    report = (
+        f"…::: BAG REPORT :::…\n\n"
+        f"| Тестировщик: [id{m.from_id}|{a_display}]\n"
+        f"| Время: {now.strftime('%H:%M:%S')}\n"
+        f"| Дата: {now.strftime('%d/%m/%Y')}\n\n"
+        f"| Отчет: « {bug_text} »"
+    )
+
+    # Отправляем во все беседы типа "bug"
+    for pid_c, chat in list(DATABASE.get("chats", {}).items()):
+        if chat.get("type") == "bug":
+            try:
+                await bot.api.messages.send(
+                    peer_id=int(pid_c),
+                    message=report,
+                    random_id=random.randint(0, 2**31)
+                )
+            except Exception as e:
+                print(f"bug report send error to {pid_c}:", e)
+
+@bot.on.message(text=["/addtester", "/addtester <args>"])
+async def addtester_cmd(m: Message, args=None):
+    await tester_role_grant(m, args, "Главный Тестировщик", "Тестировщик", "тестировщика")
+
+@bot.on.message(text=["/addsentester", "/addsentester <args>"])
+async def addsentester_cmd(m: Message, args=None):
+    await tester_role_grant(m, args, "Главный Тестировщик", "Старший Тестировщик", "старшего тестировщика")
+
+@bot.on.message(text=["/addgt", "/addgt <args>"])
+async def addgt_cmd(m: Message, args=None):
+    # Только Зам. Спец. Руководителя и выше
+    if not await check_access(m, "Зам. Спец. Руководителя"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя.")
+    if t == m.from_id:
+        return await m.answer("Вы не можете выдать роль данному пользователю!")
+    uid = str(t)
+    if uid not in DATABASE["testers"]:
+        DATABASE["testers"][uid] = {"role": "Главный Тестировщик", "bugs": 0, "joined": time.time()}
+    else:
+        DATABASE["testers"][uid]["role"] = "Главный Тестировщик"
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # Игровые команды
