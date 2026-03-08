@@ -1381,14 +1381,24 @@ async def tstaff_cmd(m: Message):
         return await m.answer("Недостаточно прав!")
 
     testers = DATABASE.get("testers", {})
+    gstaff  = DATABASE.get("gstaff", {})
 
-    # Главный тестировщик — первый найденный
-    gt_list = [(uid, data) for uid, data in testers.items()
-               if data.get("role") == "Главный Тестировщик"]
+    # Список ID глобального руководства — они не отображаются в /tstaff
+    spec_ids = set()
+    spec_ids.add(str(gstaff.get("spec", 870757778)))
+    spec_ids.add(str(870757778))
+    if gstaff.get("main_zam"):
+        spec_ids.add(str(gstaff["main_zam"]))
+    for z in gstaff.get("zams", []):
+        spec_ids.add(str(z))
+
+    # Фильтруем — руководство не показываем
+    gt_list  = [(uid, data) for uid, data in testers.items()
+                if data.get("role") == "Главный Тестировщик" and uid not in spec_ids]
     sen_list = [(uid, data) for uid, data in testers.items()
-                if data.get("role") == "Старший Тестировщик"]
+                if data.get("role") == "Старший Тестировщик" and uid not in spec_ids]
     t_list   = [(uid, data) for uid, data in testers.items()
-                if data.get("role") == "Тестировщик"]
+                if data.get("role") == "Тестировщик" and uid not in spec_ids]
 
     res = "MANLIX MANAGER | Тестировщики\n\n"
 
