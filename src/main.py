@@ -1283,6 +1283,7 @@ async def thelp_cmd(m: Message):
     await m.answer(
         "Команды тестировщиков:\n"
         "/tstats -- статистика тестировщика.\n"
+        "/tstaff -- команда тестировщиков.\n"
         "/bug -- отчет багов.\n\n"
         "Команды старших тестировщиков:\n"
         "Отсутствуют.\n\n"
@@ -1365,6 +1366,60 @@ async def bug_cmd(m: Message, args=None):
                 )
             except Exception as e:
                 print(f"bug report send error to {pid_c}:", e)
+
+@bot.on.message(text="/tstaff")
+async def tstaff_cmd(m: Message):
+    # Доступна только в беседах типа "test" или руководству
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    t_role, _ = get_tester_info(m.from_id)
+    if chat_type != "test" and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в беседе тестировщиков.")
+    if not t_role and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Недостаточно прав!")
+
+    testers = DATABASE.get("testers", {})
+
+    # Главный тестировщик — первый найденный
+    gt_list = [(uid, data) for uid, data in testers.items()
+               if data.get("role") == "Главный Тестировщик"]
+    sen_list = [(uid, data) for uid, data in testers.items()
+                if data.get("role") == "Старший Тестировщик"]
+    t_list   = [(uid, data) for uid, data in testers.items()
+                if data.get("role") == "Тестировщик"]
+
+    res = "MANLIX MANAGER | Тестировщики\n\n"
+
+    # Главный тестировщик
+    if gt_list:
+        gt_uid = gt_list[0][0]
+        res += f"Главный тестировщик -- [id{gt_uid}|MANLIX]\n"
+        for uid, _ in gt_list[1:]:
+            res += f"– [id{uid}|MANLIX]\n"
+    else:
+        res += "Главный тестировщик -- Отсутствует.\n"
+
+    # Старшие тестировщики
+    res += "\nСтаршие тестировщики:\n"
+    if sen_list:
+        for uid, _ in sen_list:
+            display = await get_display_name(int(uid), peer_id=m.peer_id)
+            res += f"– [id{uid}|{display}]\n"
+    else:
+        res += "– Отсутствуют.\n"
+
+    # Тестировщики
+    res += "\nТестировщики:\n"
+    if t_list:
+        for uid, _ in t_list:
+            display = await get_display_name(int(uid), peer_id=m.peer_id)
+            res += f"– [id{uid}|{display}]\n"
+    else:
+        res += "– Отсутствуют."
+
+    await m.answer(res.strip())
 
 @bot.on.message(text=["/addtester", "/addtester <args>"])
 async def addtester_cmd(m: Message, args=None):
