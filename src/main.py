@@ -10,7 +10,7 @@ import asyncio
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message, MessageEvent
-from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType, BaseMiddleware
+from vkbottle import Keyboard, KeyboardButtonColor, Text, Callback, GroupEventType, BaseMiddleware
 
 # ────────────────────────────────────────────────
 # НАСТРОЙКИ
@@ -501,8 +501,8 @@ async def mute_cmd(m: Message, args=None):
     dt = datetime.datetime.fromtimestamp(until, TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
     kb = Keyboard(inline=True)
     kb.row()
-    kb.add(Text("Снять мут", {"cmd": "unmute_btn", "uid": str(t)}), color=KeyboardButtonColor.POSITIVE)
-    kb.add(Text("Очистить",  {"cmd": "clear_msg",  "uid": str(t)}), color=KeyboardButtonColor.NEGATIVE)
+    kb.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": str(t)}), color=KeyboardButtonColor.POSITIVE)
+    kb.add(Callback("Очистить",  {"cmd": "clear_msg",  "uid": str(t)}), color=KeyboardButtonColor.NEGATIVE)
     await m.answer(
         f"[id{m.from_id}|Модератор MANLIX] выдал(-а) мут [id{t}|пользователю]\n"
         f"Причина: {reason}\n"
@@ -534,78 +534,20 @@ async def unmute_cmd(m: Message, args=None):
 # Пустая inline-клавиатура как JSON-строка для messages.edit
 EMPTY_KB_JSON = '{"inline":true,"buttons":[]}'
 
-@bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=MessageEvent)
+@bot.on.raw_event(GroupEventType.MESSAGE_EVENT, MessageEvent)
 async def all_buttons(event: MessageEvent):
-    # ── Надёжное извлечение данных из MessageEvent ──
-    try:
-        obj = event.object
-    except:
-        obj = event
-
-    # Извлекаем peer_id
-    peer_id = None
-    for src in (obj, event):
-        for attr in ("peer_id",):
-            try:
-                v = getattr(src, attr, None)
-                if v:
-                    peer_id = int(v)
-                    break
-            except: pass
-        if peer_id: break
-
-    # Извлекаем user_id (кто нажал кнопку)
-    actor_id = None
-    for src in (obj, event):
-        for attr in ("user_id",):
-            try:
-                v = getattr(src, attr, None)
-                if v:
-                    actor_id = int(v)
-                    break
-            except: pass
-        if actor_id: break
-
-    # Извлекаем conversation_message_id
-    cmid = None
-    for src in (obj, event):
-        for attr in ("conversation_message_id",):
-            try:
-                v = getattr(src, attr, None)
-                if v:
-                    cmid = int(v)
-                    break
-            except: pass
-        if cmid: break
-
-    # Извлекаем event_id (нужен для send_message_event_answer)
-    event_id = None
-    for src in (obj, event):
-        for attr in ("event_id",):
-            try:
-                v = getattr(src, attr, None)
-                if v:
-                    event_id = str(v)
-                    break
-            except: pass
-        if event_id: break
-
-    # Извлекаем payload
-    raw_payload = None
-    for src in (obj, event):
-        for attr in ("payload",):
-            try:
-                v = getattr(src, attr, None)
-                if v is not None:
-                    raw_payload = v
-                    break
-            except: pass
-        if raw_payload is not None: break
-
-    if raw_payload is None or peer_id is None or actor_id is None:
-        return
+    # Правильный паттерн по официальной документации vkbottle:
+    # MessageEvent имеет атрибуты напрямую: peer_id, user_id, event_id,
+    # conversation_message_id, payload
+    # и методы: show_snackbar(), send_message_event_answer()
+    peer_id  = event.peer_id
+    actor_id = event.user_id
+    cmid     = event.conversation_message_id
 
     # Нормализуем payload -> dict
+    raw_payload = event.payload
+    if raw_payload is None:
+        return
     if isinstance(raw_payload, dict):
         payload = raw_payload
     elif isinstance(raw_payload, str):
@@ -614,12 +556,6 @@ async def all_buttons(event: MessageEvent):
         except:
             return
     else:
-        try:
-            payload = json.loads(str(raw_payload))
-        except:
-            return
-
-    if not isinstance(payload, dict):
         return
 
     cmd = payload.get("cmd")
@@ -628,15 +564,10 @@ async def all_buttons(event: MessageEvent):
 
     pid = str(peer_id)
 
-    # Вспомогательная функция для snackbar
+    # Используем встроенный метод show_snackbar из MessageEvent
     async def snackbar(text: str):
         try:
-            await bot.api.messages.send_message_event_answer(
-                event_id=event_id,
-                user_id=actor_id,
-                peer_id=peer_id,
-                event_data=json.dumps({"type": "show_snackbar", "text": text})
-            )
+            await event.show_snackbar(text)
         except Exception as e:
             print("snackbar error:", e)
 
@@ -1664,7 +1595,7 @@ async def duel_create(m: Message, amount=None):
         "chat_id":      pid
     }
     kb = Keyboard(inline=True)
-    kb.add(Text("Вступить в дуэль!", {"cmd": "join_duel", "duel": duel_id}), color=KeyboardButtonColor.POSITIVE)
+    kb.add(Callback("Вступить в дуэль!", {"cmd": "join_duel", "duel": duel_id}), color=KeyboardButtonColor.POSITIVE)
     await m.answer(
         f"⚔️ Дуэль на {amount}$ создана!\n"
         f"Нажми на кнопку, чтобы сразиться!",
