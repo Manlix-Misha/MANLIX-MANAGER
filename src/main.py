@@ -864,6 +864,11 @@ async def gunrole_cmd(m: Message, args=None):
             removed = True
         else:
             return await m.answer("Снять Основного Зам. может только Специальный Руководитель.")
+    # Снимаем роль тестировщика
+    uid = str(t)
+    if uid in DATABASE.get("testers", {}):
+        del DATABASE["testers"][uid]
+        removed = True
     if not removed:
         return await m.answer("У этого пользователя нет глобальных прав.")
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
@@ -1265,9 +1270,14 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
 
 @bot.on.message(text="/thelp")
 async def thelp_cmd(m: Message):
-    # Доступна только тестировщикам и глобальному руководству (ЗСР+)
+    # Работает только в беседах типа "test" (или руководство)
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
     t_role, _ = get_tester_info(m.from_id)
     my_global, _ = get_user_info(m.peer_id, m.from_id)
+    if chat_type != "test" and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в беседе тестировщиков.")
     if not t_role and RANK_WEIGHT.get(my_global, 0) < 8:
         return await m.answer("Недостаточно прав!")
     await m.answer(
@@ -1287,6 +1297,13 @@ async def thelp_cmd(m: Message):
 
 @bot.on.message(text=["/tstats", "/tstats <args>"])
 async def tstats_cmd(m: Message, args=None):
+    # Работает только в беседах типа "test" (или руководство)
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    if chat_type != "test" and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в беседе тестировщиков.")
     t = await get_target_id(m, args) or m.from_id
     uid = str(t)
     role, bugs = get_tester_info(t)
@@ -1303,27 +1320,35 @@ async def tstats_cmd(m: Message, args=None):
 
 @bot.on.message(text=["/bug", "/bug <args>"])
 async def bug_cmd(m: Message, args=None):
-    role, _ = get_tester_info(m.from_id)
+    # Работает только в беседах типа "test"
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
     my_global, _ = get_user_info(m.peer_id, m.from_id)
+    if chat_type != "test" and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в беседе тестировщиков.")
+
+    role, _ = get_tester_info(m.from_id)
     if not role and RANK_WEIGHT.get(my_global, 0) < 8:
         return await m.answer("Недостаточно прав!")
+
     uid = str(m.from_id)
     if uid not in DATABASE["testers"]:
         DATABASE["testers"][uid] = {"role": role or "Тестировщик", "bugs": 0, "joined": time.time()}
     DATABASE["testers"][uid]["bugs"] = DATABASE["testers"][uid].get("bugs", 0) + 1
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
 
-    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     bug_text = (args or "").strip()
 
-    # Подтверждение тестировщику
+    # Подтверждение тестировщику — ник в беседе если есть, иначе имя ВК
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] отправил отчет с Багами.")
 
-    # Формируем репорт
+    # В репорте всегда надпись MANLIX
     now = datetime.datetime.now(TZ_MSK)
     report = (
         f"…::: BAG REPORT :::…\n\n"
-        f"| Тестировщик: [id{m.from_id}|{a_display}]\n"
+        f"| Тестировщик: [id{m.from_id}|MANLIX]\n"
         f"| Время: {now.strftime('%H:%M:%S')}\n"
         f"| Дата: {now.strftime('%d/%m/%Y')}\n\n"
         f"| Отчет: « {bug_text} »"
