@@ -910,9 +910,9 @@ async def staff_view(m: Message):
         if r == "Владелец":
             owner_ids = [u for u, entry in staff.items() if entry[0] == "Владелец"]
             if owner_ids:
-                block = f"Владелец -- https://vk.com/id{owner_ids[0]}"
+                block = f"Владелец -- [id{owner_ids[0]}|MANLIX MANAGER]"
                 for oid in owner_ids[1:]:
-                    block += f"\n– https://vk.com/id{oid}"
+                    block += f"\n– [id{oid}|MANLIX MANAGER]"
             else:
                 block = "Владелец -- MANLIX MANAGER"
         else:
@@ -952,6 +952,9 @@ async def setnick(m: Message, args=None):
     pid, uid    = str(m.peer_id), str(t)
     ensure_chat(pid)
     role_now, _ = get_user_info(m.peer_id, t)
+    # Владельцу нельзя менять ник — он всегда MANLIX MANAGER в /staff
+    if role_now == "Владелец":
+        return await m.answer("Нельзя изменить имя владельца беседы.")
     DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
@@ -1061,17 +1064,17 @@ async def gstaff_view(m: Message):
     if not await check_access(m, "Зам. Спец. Руководителя"): return
     g   = DATABASE["gstaff"]
     res = "MANLIX MANAGER | Команда Бота:\n\n"
-    res += "| Специальный Руководитель:\n– https://vk.com/id870757778\n\n"
+    res += "| Специальный Руководитель:\n– [id870757778|MANLIX]\n\n"
     res += "| Основной зам. Спец. Руководителя:\n"
     if g.get("main_zam"):
-        res += f"– https://vk.com/id{g['main_zam']}\n"
+        res += f"– [id{g['main_zam']}|MANLIX]\n"
     else:
         res += "– Отсутствует.\n"
     res += "\n| Зам. Спец. Руководителя:\n"
     zams = g.get("zams", [])
     if zams:
         for z in zams:
-            res += f"– https://vk.com/id{z}\n"
+            res += f"– [id{z}|MANLIX]\n"
     else:
         res += "– Отсутствует.\n– Отсутствует.\n"
     await m.answer(res.strip())
@@ -1401,9 +1404,9 @@ async def tstaff_cmd(m: Message):
     # Главный тестировщик
     if gt_list:
         gt_uid = gt_list[0][0]
-        res += f"Главный тестировщик -- https://vk.com/id{gt_uid}\n"
+        res += f"Главный тестировщик -- [id{gt_uid}|MANLIX]\n"
         for uid, _ in gt_list[1:]:
-            res += f"– https://vk.com/id{uid}\n"
+            res += f"– [id{uid}|MANLIX]\n"
     else:
         res += "Главный тестировщик -- Отсутствует.\n"
 
