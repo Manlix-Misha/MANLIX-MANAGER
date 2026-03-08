@@ -906,18 +906,14 @@ async def staff_view(m: Message):
                         display = f"{uinfo[0].first_name} {uinfo[0].last_name}"
                     except:
                         display = "пользователь"
-                members.append(f"– [id{u}|{display}]")
+                members.append(f"– https://vk.com/id{u}")
         if r == "Владелец":
-            # Ищем владельцев в staff беседы
             owner_ids = [u for u, entry in staff.items() if entry[0] == "Владелец"]
             if owner_ids:
-                # Первый владелец — главная строка со ссылкой + ник MANLIX MANAGER
-                block = f"Владелец -- [id{owner_ids[0]}|MANLIX MANAGER]"
-                # Если владельцев несколько — остальные ниже
+                block = f"Владелец -- https://vk.com/id{owner_ids[0]}"
                 for oid in owner_ids[1:]:
-                    block += f"\n– [id{oid}|MANLIX MANAGER]"
+                    block += f"\n– https://vk.com/id{oid}"
             else:
-                # Нет ни одного владельца — просто текст
                 block = "Владелец -- MANLIX MANAGER"
         else:
             if members:
@@ -1065,17 +1061,17 @@ async def gstaff_view(m: Message):
     if not await check_access(m, "Зам. Спец. Руководителя"): return
     g   = DATABASE["gstaff"]
     res = "MANLIX MANAGER | Команда Бота:\n\n"
-    res += "| Специальный Руководитель:\n– [id870757778|Misha Manlix]\n\n"
+    res += "| Специальный Руководитель:\n– https://vk.com/id870757778\n\n"
     res += "| Основной зам. Спец. Руководителя:\n"
     if g.get("main_zam"):
-        res += f"– [id{g['main_zam']}|пользователь]\n"
+        res += f"– https://vk.com/id{g['main_zam']}\n"
     else:
         res += "– Отсутствует.\n"
     res += "\n| Зам. Спец. Руководителя:\n"
     zams = g.get("zams", [])
     if zams:
         for z in zams:
-            res += f"– [id{z}|пользователь]\n"
+            res += f"– https://vk.com/id{z}\n"
     else:
         res += "– Отсутствует.\n– Отсутствует.\n"
     await m.answer(res.strip())
@@ -1405,9 +1401,9 @@ async def tstaff_cmd(m: Message):
     # Главный тестировщик
     if gt_list:
         gt_uid = gt_list[0][0]
-        res += f"Главный тестировщик -- [id{gt_uid}|MANLIX]\n"
+        res += f"Главный тестировщик -- https://vk.com/id{gt_uid}\n"
         for uid, _ in gt_list[1:]:
-            res += f"– [id{uid}|MANLIX]\n"
+            res += f"– https://vk.com/id{uid}\n"
     else:
         res += "Главный тестировщик -- Отсутствует.\n"
 
@@ -1415,8 +1411,7 @@ async def tstaff_cmd(m: Message):
     res += "\nСтаршие тестировщики:\n"
     if sen_list:
         for uid, _ in sen_list:
-            display = await get_display_name(int(uid), peer_id=m.peer_id)
-            res += f"– [id{uid}|{display}]\n"
+            res += f"– https://vk.com/id{uid}\n"
     else:
         res += "– Отсутствуют.\n"
 
@@ -1424,8 +1419,7 @@ async def tstaff_cmd(m: Message):
     res += "\nТестировщики:\n"
     if t_list:
         for uid, _ in t_list:
-            display = await get_display_name(int(uid), peer_id=m.peer_id)
-            res += f"– [id{uid}|{display}]\n"
+            res += f"– https://vk.com/id{uid}\n"
     else:
         res += "– Отсутствуют."
 
