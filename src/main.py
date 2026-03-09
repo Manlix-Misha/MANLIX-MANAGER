@@ -17,13 +17,15 @@ from vkbottle import Keyboard, KeyboardButtonColor, Text, Callback, GroupEventTy
 # ────────────────────────────────────────────────
 GH_TOKEN    = os.environ.get("GH_TOKEN")
 GH_REPO     = os.environ.get("GH_REPO")
-GH_PATH_DB  = "database.json"
-GH_PATH_ECO = "economy.json"
-GH_PATH_PUN = "punishments.json"
+GH_PATH_DB    = "database.json"
+GH_PATH_ECO   = "economy.json"
+GH_PATH_PUN   = "punishments.json"
+GH_PATH_STAFF = "staff.json"
 
-EXTERNAL_DB  = "database.json"
-EXTERNAL_ECO = "economy.json"
-EXTERNAL_PUN = "punishments.json"
+EXTERNAL_DB    = "database.json"
+EXTERNAL_ECO   = "economy.json"
+EXTERNAL_PUN   = "punishments.json"
+EXTERNAL_STAFF = "staff.json"
 
 TZ_MSK = datetime.timezone(datetime.timedelta(hours=3))
 
@@ -126,27 +128,33 @@ async def push_to_github(data, gh_path, local_path):
 # ────────────────────────────────────────────────
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
-DATABASE    = loop.run_until_complete(load_from_github(GH_PATH_DB,  EXTERNAL_DB))
-ECONOMY     = loop.run_until_complete(load_from_github(GH_PATH_ECO, EXTERNAL_ECO))
-PUNISHMENTS = loop.run_until_complete(load_from_github(GH_PATH_PUN, EXTERNAL_PUN))
+DATABASE    = loop.run_until_complete(load_from_github(GH_PATH_DB,    EXTERNAL_DB))
+ECONOMY     = loop.run_until_complete(load_from_github(GH_PATH_ECO,   EXTERNAL_ECO))
+PUNISHMENTS = loop.run_until_complete(load_from_github(GH_PATH_PUN,   EXTERNAL_PUN))
+STAFF       = loop.run_until_complete(load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF))
 
 if not isinstance(DATABASE,    dict): DATABASE    = {}
 if not isinstance(ECONOMY,     dict): ECONOMY     = {}
 if not isinstance(PUNISHMENTS, dict): PUNISHMENTS = {}
+if not isinstance(STAFF,       dict): STAFF       = {}
 
 for key in ("gbans_status", "gbans_pl", "bans", "warns"):
     if key not in PUNISHMENTS:
         PUNISHMENTS[key] = {}
 if "chats" not in DATABASE:
     DATABASE["chats"] = {}
-if "gstaff" not in DATABASE:
-    DATABASE["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
 if "duels" not in DATABASE:
     DATABASE["duels"] = {}
-if "testers" not in DATABASE:
-    DATABASE["testers"] = {}
 if "bot_status" not in DATABASE:
     DATABASE["bot_status"] = "on"
+
+# ── STAFF инициализация ──
+if "gstaff" not in STAFF:
+    STAFF["gstaff"] = {"spec": 870757778, "main_zam": None, "zams": []}
+if "testers" not in STAFF:
+    STAFF["testers"] = {}
+if "texstaff" not in STAFF:
+    STAFF["texstaff"] = {}
 
 GROUP_ID = None
 
@@ -282,7 +290,7 @@ def parse_mute_args(args: str):
 
 def get_user_info(peer_id, user_id):
     uid    = str(user_id)
-    gstaff = DATABASE.get("gstaff", {})
+    gstaff = STAFF.get("gstaff", {})
     if user_id == gstaff.get("spec") or user_id == 870757778:
         global_role = "Специальный Руководитель"
     elif gstaff.get("main_zam") and user_id == gstaff["main_zam"]:
@@ -863,12 +871,12 @@ async def addzsr(m: Message, args=None):
     if t == m.from_id:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
     uid = str(t)
-    gstaff = DATABASE["gstaff"]
+    gstaff = STAFF["gstaff"]
     if "zams" not in gstaff:
         gstaff["zams"] = []
     if t not in gstaff["zams"]:
         gstaff["zams"].append(t)
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [id{t}|пользователю]")
 
@@ -881,8 +889,8 @@ async def addozsr(m: Message, args=None):
         return await m.answer("Укажите пользователя.")
     if t == m.from_id:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
-    DATABASE["gstaff"]["main_zam"] = t
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    STAFF["gstaff"]["main_zam"] = t
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя специального руководителя [id{t}|пользователю]")
 
@@ -914,7 +922,7 @@ async def gunrole_cmd(m: Message, args=None):
         return await m.answer("Укажите пользователя.")
     if t == m.from_id:
         return await m.answer("Нельзя снимать права у самого себя.")
-    gstaff = DATABASE["gstaff"]
+    gstaff = STAFF["gstaff"]
     removed = False
     # Снимаем из зам. спец. руководителей
     if t in gstaff.get("zams", []):
@@ -930,12 +938,12 @@ async def gunrole_cmd(m: Message, args=None):
             return await m.answer("Снять Основного Зам. может только Специальный Руководитель.")
     # Снимаем роль тестировщика
     uid = str(t)
-    if uid in DATABASE.get("testers", {}):
-        del DATABASE["testers"][uid]
+    if uid in STAFF.get("testers", {}):
+        del STAFF["testers"][uid]
         removed = True
     if not removed:
         return await m.answer("У этого пользователя нет глобальных прав.")
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [id{t}|пользователю]")
 
@@ -1131,7 +1139,7 @@ async def getban_cmd(m: Message, args=None):
 @bot.on.message(text="/gstaff")
 async def gstaff_view(m: Message):
     if not await check_access(m, "Зам. Спец. Руководителя"): return
-    g   = DATABASE["gstaff"]
+    g   = STAFF["gstaff"]
     res = "MANLIX MANAGER | Команда Бота:\n\n"
     res += "| Специальный Руководитель:\n– [id870757778|MANLIX]\n\n"
     res += "| Основной зам. Спец. Руководителя:\n"
@@ -1232,10 +1240,11 @@ async def delchat(m: Message):
 @bot.on.message(text="/sync")
 async def sync(m: Message):
     if not await check_access(m, "Специальный Руководитель"): return
-    global DATABASE, ECONOMY, PUNISHMENTS
-    DATABASE    = await load_from_github(GH_PATH_DB,  EXTERNAL_DB)
-    ECONOMY     = await load_from_github(GH_PATH_ECO, EXTERNAL_ECO)
-    PUNISHMENTS = await load_from_github(GH_PATH_PUN, EXTERNAL_PUN)
+    global DATABASE, ECONOMY, PUNISHMENTS, STAFF
+    DATABASE    = await load_from_github(GH_PATH_DB,    EXTERNAL_DB)
+    ECONOMY     = await load_from_github(GH_PATH_ECO,   EXTERNAL_ECO)
+    PUNISHMENTS = await load_from_github(GH_PATH_PUN,   EXTERNAL_PUN)
+    STAFF       = await load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF)
     await m.answer("Вы успешно синхронизировали Беседу с Базой данных.")
 
 # ────────────────────────────────────────────────
@@ -1372,7 +1381,7 @@ async def gunbanpl_cmd(m: Message, args=None):
 def get_tester_info(user_id: int):
     """Возвращает (роль_тестировщика, кол-во_багов) или (None, 0)."""
     uid = str(user_id)
-    entry = DATABASE.get("testers", {}).get(uid)
+    entry = STAFF.get("testers", {}).get(uid)
     if entry:
         return entry.get("role"), entry.get("bugs", 0)
     return None, 0
@@ -1394,11 +1403,11 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
     if t == m.from_id:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
     uid = str(t)
-    if uid not in DATABASE["testers"]:
-        DATABASE["testers"][uid] = {"role": role_name, "bugs": 0, "joined": time.time()}
+    if uid not in STAFF["testers"]:
+        STAFF["testers"][uid] = {"role": role_name, "bugs": 0, "joined": time.time()}
     else:
-        DATABASE["testers"][uid]["role"] = role_name
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        STAFF["testers"][uid]["role"] = role_name
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|пользователю]")
 
@@ -1468,10 +1477,10 @@ async def bug_cmd(m: Message, args=None):
         return await m.answer("Недостаточно прав!")
 
     uid = str(m.from_id)
-    if uid not in DATABASE["testers"]:
-        DATABASE["testers"][uid] = {"role": role or "Тестировщик", "bugs": 0, "joined": time.time()}
-    DATABASE["testers"][uid]["bugs"] = DATABASE["testers"][uid].get("bugs", 0) + 1
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    if uid not in STAFF["testers"]:
+        STAFF["testers"][uid] = {"role": role or "Тестировщик", "bugs": 0, "joined": time.time()}
+    STAFF["testers"][uid]["bugs"] = STAFF["testers"][uid].get("bugs", 0) + 1
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
 
     bug_text = (args or "").strip()
 
@@ -1514,8 +1523,8 @@ async def tstaff_cmd(m: Message):
     if not t_role and RANK_WEIGHT.get(my_global, 0) < 8:
         return await m.answer("Недостаточно прав!")
 
-    testers = DATABASE.get("testers", {})
-    gstaff  = DATABASE.get("gstaff", {})
+    testers = STAFF.get("testers", {})
+    gstaff  = STAFF.get("gstaff", {})
 
     # Список ID глобального руководства — они не отображаются в /tstaff
     spec_ids = set()
@@ -1581,11 +1590,11 @@ async def addgt_cmd(m: Message, args=None):
     if t == m.from_id:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
     uid = str(t)
-    if uid not in DATABASE["testers"]:
-        DATABASE["testers"][uid] = {"role": "Главный Тестировщик", "bugs": 0, "joined": time.time()}
+    if uid not in STAFF["testers"]:
+        STAFF["testers"][uid] = {"role": "Главный Тестировщик", "bugs": 0, "joined": time.time()}
     else:
-        DATABASE["testers"][uid]["role"] = "Главный Тестировщик"
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        STAFF["testers"][uid]["role"] = "Главный Тестировщик"
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [id{t}|пользователю]")
 
