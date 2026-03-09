@@ -9,7 +9,7 @@ import random
 import asyncio
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from vkbottle.bot import Bot, Message, MessageEvent, rules
+from vkbottle.bot import Bot, Message, MessageEvent
 from vkbottle import Keyboard, KeyboardButtonColor, Text, Callback, GroupEventType, BaseMiddleware
 
 # ────────────────────────────────────────────────
@@ -390,58 +390,6 @@ class ChatMiddleware(BaseMiddleware[Message]):
             self.stop()
 
 bot.labeler.message_view.register_middleware(ChatMiddleware)
-
-# ────────────────────────────────────────────────
-# Событие: пользователь или бот добавлен в беседу
-# Используем ChatActionRule — правильный способ в vkbottle 4.x
-# ────────────────────────────────────────────────
-@bot.on.chat_message((
-    rules.ChatActionRule("chat_invite_user"),
-    rules.ChatActionRule("chat_invite_user_by_link")
-))
-async def chat_invite_handler(m: Message):
-    try:
-        action    = getattr(m, "action", None)
-        if not action:
-            return
-        member_id = getattr(action, "member_id", None)
-        if not member_id:
-            return
-        peer_id = m.peer_id
-
-        # Бот добавлен (member_id отрицательный = группа/бот)
-        if member_id < 0:
-            await bot.api.messages.send(
-                peer_id=peer_id,
-                message=(
-                    "Бот добавлен в беседу, выдайте мне администратора, "
-                    "а затем введите /sync для синхронизации c базой данных!\n\n"
-                    "Также с помощью /type Вы можете выбрать тип беседы!"
-                ),
-                random_id=random.randint(0, 2**31)
-            )
-            return
-
-        # Пользователь добавлен — проверяем глобальный бан
-        uid = str(member_id)
-        if uid not in PUNISHMENTS.get("gbans_status", {}):
-            return
-        b  = PUNISHMENTS["gbans_status"][uid]
-        dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
-        kb = Keyboard(inline=True)
-        kb.add(Callback("Разблокировать", {"cmd": "gunban_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
-        await bot.api.messages.send(
-            peer_id=peer_id,
-            message=(
-                f"[id{member_id}|Пользователь] находится в Глобальной Блокировке.\n\n"
-                f"Информация о Блокировке:\n"
-                f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}"
-            ),
-            keyboard=kb.get_json(),
-            random_id=random.randint(0, 2**31)
-        )
-    except Exception as e:
-        print("chat_invite_handler error:", e)
 
 # ────────────────────────────────────────────────
 # /help
@@ -1804,25 +1752,60 @@ async def actions(m: Message):
         return
     if typ in ("chat_invite_user", "chat_invite_user_by_link"):
         invited = m.action.member_id
-        if invited and invited > 0:
-            uid = str(invited)
-            pid = str(m.peer_id)
-            ensure_chat(pid)
-            banned = (
-                uid in PUNISHMENTS.get("gbans_status", {}) or
-                uid in PUNISHMENTS.get("gbans_pl",     {}) or
-                uid in PUNISHMENTS.get("bans", {}).get(pid, {})
+        if not invited:
+            return
+
+        # Бот добавлен в беседу (member_id отрицательный)
+        if invited < 0:
+            await bot.api.messages.send(
+                peer_id=m.peer_id,
+                message=(
+                    "Бот добавлен в беседу, выдайте мне администратора, "
+                    "а затем введите /sync для синхронизации c базой данных!\n\n"
+                    "Также с помощью /type Вы можете выбрать тип беседы!"
+                ),
+                random_id=random.randint(0, 2**31)
             )
-            if banned:
-                try:
-                    chat_id = m.peer_id - 2000000000
-                    await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=invited)
-                except:
-                    pass
-                await m.answer(
-                    f"[id870757778|Модератор MANLIX] исключил(-а) [id{invited}|пользователя] "
-                    f"— он находится в списке блокировок."
-                )
+            return
+
+        # Пользователь добавлен
+        uid = str(invited)
+        pid = str(m.peer_id)
+        ensure_chat(pid)
+
+        # Проверяем глобальный бан
+        if uid in PUNISHMENTS.get("gbans_status", {}):
+            b  = PUNISHMENTS["gbans_status"][uid]
+            dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
+            kb = Keyboard(inline=True)
+            kb.add(Callback("Разблокировать", {"cmd": "gunban_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
+            await bot.api.messages.send(
+                peer_id=m.peer_id,
+                message=(
+                    f"[id{invited}|Пользователь] находится в Глобальной Блокировке.\n\n"
+                    f"Информация о Блокировке:\n"
+                    f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}"
+                ),
+                keyboard=kb.get_json(),
+                random_id=random.randint(0, 2**31)
+            )
+            return
+
+        # Если в локальном или игровом бане — исключить
+        banned = (
+            uid in PUNISHMENTS.get("gbans_pl",     {}) or
+            uid in PUNISHMENTS.get("bans", {}).get(pid, {})
+        )
+        if banned:
+            try:
+                chat_id = m.peer_id - 2000000000
+                await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=invited)
+            except:
+                pass
+            await m.answer(
+                f"[id870757778|Модератор MANLIX] исключил(-а) [id{invited}|пользователя] "
+                f"— он находится в списке блокировок."
+            )
 
 # ────────────────────────────────────────────────
 # Технические отчёты
