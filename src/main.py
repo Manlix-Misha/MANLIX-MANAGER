@@ -216,6 +216,24 @@ async def get_target_id(m: Message, args: str = None):
     if first.isdigit():
         return int(first)
 
+    # vk.com/screenname или vk.ru/screenname (не id-ссылка)
+    match = re.search(r"https?://vk\.(com|ru)/([A-Za-z0-9_\.]+)", args)
+    if match:
+        sn = match.group(2)
+        if not sn.startswith("id"):
+            try:
+                res = await bot.api.utils.resolve_screen_name(screen_name=sn)
+                if res and res.type == "user":
+                    return int(res.object_id)
+            except:
+                pass
+        else:
+            # vk.com/id123 — на случай если первый regex не сработал
+            try:
+                return int(sn[2:])
+            except:
+                pass
+
     # screen_name — только если не похож на ссылку
     if first and not first.startswith("http") and "/" not in first:
         try:
@@ -348,6 +366,68 @@ class ChatMiddleware(BaseMiddleware[Message]):
 bot.labeler.message_view.register_middleware(ChatMiddleware)
 
 # ────────────────────────────────────────────────
+# Событие: бот добавлен в беседу
+# ────────────────────────────────────────────────
+@bot.on.raw_event(GroupEventType.CHAT_INVITE_USER, dataclass=MessageEvent)
+async def bot_invited(event: MessageEvent):
+    try:
+        obj     = event.object
+        peer_id = getattr(obj, "peer_id", None)
+        action  = getattr(obj, "action", None)
+        # Проверяем что именно бот был добавлен
+        if action and getattr(action, "member_id", None):
+            member_id = action.member_id
+            gstaff    = DATABASE.get("gstaff", {})
+            bot_group_id = DATABASE.get("group_id")
+            # member_id отрицательный = группа/бот
+            if peer_id and member_id and member_id < 0:
+                await bot.api.messages.send(
+                    peer_id=peer_id,
+                    message=(
+                        "Бот добавлен в беседу, выдайте мне администратора, "
+                        "а затем введите /sync для синхронизации c базой данных!\n\n"
+                        "Также с помощью /type Вы можете выбрать тип беседы!"
+                    ),
+                    random_id=random.randint(0, 2**31)
+                )
+    except Exception as e:
+        print("bot_invited error:", e)
+
+# ────────────────────────────────────────────────
+# Событие: пользователь добавлен в беседу — проверка глобального бана
+# ────────────────────────────────────────────────
+@bot.on.raw_event(GroupEventType.CHAT_INVITE_USER, dataclass=MessageEvent)
+async def user_invited(event: MessageEvent):
+    try:
+        obj     = event.object
+        peer_id = getattr(obj, "peer_id", None)
+        action  = getattr(obj, "action", None)
+        if not action or not peer_id:
+            return
+        member_id = getattr(action, "member_id", None)
+        if not member_id or member_id < 0:
+            return  # бот или группа — пропускаем
+        uid = str(member_id)
+        if uid not in PUNISHMENTS.get("gbans_status", {}):
+            return
+        b   = PUNISHMENTS["gbans_status"][uid]
+        dt  = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
+        kb  = Keyboard(inline=True)
+        kb.add(Callback("Разблокировать", {"cmd": "gunban_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
+        await bot.api.messages.send(
+            peer_id=peer_id,
+            message=(
+                f"[id{member_id}|Пользователь] находится в Глобальной Блокировке.\n\n"
+                f"Информация о Блокировке:\n"
+                f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}"
+            ),
+            keyboard=kb.get_json(),
+            random_id=random.randint(0, 2**31)
+        )
+    except Exception as e:
+        print("user_invited error:", e)
+
+# ────────────────────────────────────────────────
 # /help
 # ────────────────────────────────────────────────
 @bot.on.message(text="/help")
@@ -356,7 +436,7 @@ async def help_cmd(m: Message):
     w = RANK_WEIGHT.get(rank, 0)
     res = (
         "Команды пользователей:\n"
-        "/info -- официальные ресурсы\n"
+        "/info -- официальные ресурсы.\n"
         "/stats -- статистика пользователя\n"
         "/getid -- оригинальная ссылка VK."
     )
@@ -417,7 +497,8 @@ async def help_cmd(m: Message):
             "/gunbanpl -- снятие Блокировки во всех игровых Беседах.\n\n"
             "Основной Зам. Спец. Руководителя:\n"
             "/addzsr -- выдать права заместителя спец. руководителя.\n"
-            "/thelp -- список команд для тестировщиков.\n\n"
+            "/thelp -- список команд для тестировщиков.\n"
+            "/msg -- отправить рассылку.\n\n"
             "Спец. Руководителя:\n"
             "/addozsr -- выдать права основного заместителя спец. руководителя.\n"
             "/start -- активировать Беседу.\n"
@@ -624,6 +705,28 @@ async def all_buttons(event: MessageEvent):
             except Exception as e:
                 print("edit clear error:", e)
             await snackbar("Сообщения очищены")
+        return
+
+    # ── Кнопка разблокировать (при добавлении в беседу) ──
+    if cmd == "gunban_btn":
+        uid = str(payload.get("uid", ""))
+        rank, _ = get_user_info(peer_id, actor_id)
+        if RANK_WEIGHT.get(rank, 0) < 8:
+            await snackbar("Недостаточно прав")
+            return
+        if uid in PUNISHMENTS.get("gbans_status", {}):
+            del PUNISHMENTS["gbans_status"][uid]
+            await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+        try:
+            await bot.api.request("messages.edit", {
+                "peer_id": peer_id,
+                "conversation_message_id": cmid,
+                "message": f"[id{uid}|Пользователь] разблокирован.",
+                "keyboard": EMPTY_KB_JSON
+            })
+        except Exception as e:
+            print("gunban_btn edit error:", e)
+        await snackbar("Пользователь разблокирован")
         return
 
     # ── Кнопка дуэли ─────────────────────────────
@@ -998,7 +1101,12 @@ async def nick_list(m: Message):
 @bot.on.message(text=["/getban", "/getban <args>"])
 async def getban_cmd(m: Message, args=None):
     if not await check_access(m, "Модератор"): return
-    t = await get_target_id(m, args)
+    # Поддержка reply + ссылок + id
+    t = None
+    if getattr(m, "reply_message", None):
+        t = m.reply_message.from_id
+    if not t:
+        t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
     uid = str(t)
@@ -1164,6 +1272,39 @@ async def sync(m: Message):
     ECONOMY     = await load_from_github(GH_PATH_ECO, EXTERNAL_ECO)
     PUNISHMENTS = await load_from_github(GH_PATH_PUN, EXTERNAL_PUN)
     await m.answer("Вы успешно синхронизировали Беседу с Базой данных.")
+
+# ────────────────────────────────────────────────
+# /msg — рассылка во все беседы выбранного типа
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/msg", "/msg <args>"])
+async def msg_cmd(m: Message, args=None):
+    if not await check_access(m, "Основной Зам. Спец. Руководителя"): return
+    if not args or not args.strip():
+        return await m.answer("Использование: /msg [тип] [сообщение]")
+    parts    = args.strip().split(None, 1)
+    chat_type = parts[0].lower()
+    text      = parts[1] if len(parts) > 1 else ""
+    if not text:
+        return await m.answer("Укажите текст сообщения.")
+    valid_types = ["def", "adm", "mod", "pl", "test", "tex", "bug"]
+    if chat_type not in valid_types:
+        return await m.answer(f"Неверный тип. Доступные: {', '.join(valid_types)}")
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id, use_nick=False)
+    sent = 0
+    for pid_c, chat in list(DATABASE.get("chats", {}).items()):
+        if chat.get("type") == chat_type:
+            try:
+                await bot.api.messages.send(
+                    peer_id=int(pid_c),
+                    message=text,
+                    random_id=random.randint(0, 2**31)
+                )
+                sent += 1
+            except Exception as e:
+                print(f"/msg send error to {pid_c}:", e)
+    await m.answer(
+        f"[id{m.from_id}|{a_display}] отправил рассылку в типы бесед « {chat_type} »"
+    )
 
 # ────────────────────────────────────────────────
 # /gban / /gunban
