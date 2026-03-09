@@ -9,9 +9,8 @@ import random
 import asyncio
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from vkbottle.bot import Bot, Message, MessageEvent
+from vkbottle.bot import Bot, Message, MessageEvent, rules
 from vkbottle import Keyboard, KeyboardButtonColor, Text, Callback, GroupEventType, BaseMiddleware
-from vkbottle.bot import rules as bot_rules
 
 # ────────────────────────────────────────────────
 # НАСТРОЙКИ
@@ -396,7 +395,10 @@ bot.labeler.message_view.register_middleware(ChatMiddleware)
 # Событие: пользователь или бот добавлен в беседу
 # Используем ChatActionRule — правильный способ в vkbottle 4.x
 # ────────────────────────────────────────────────
-@bot.on.message(bot_rules.ChatActionRule("chat_invite_user", "chat_invite_user_by_link"))
+@bot.on.chat_message((
+    rules.ChatActionRule("chat_invite_user"),
+    rules.ChatActionRule("chat_invite_user_by_link")
+))
 async def chat_invite_handler(m: Message):
     try:
         action    = getattr(m, "action", None)
