@@ -146,6 +146,8 @@ if "duels" not in DATABASE:
     DATABASE["duels"] = {}
 if "testers" not in DATABASE:
     DATABASE["testers"] = {}
+if "bot_status" not in DATABASE:
+    DATABASE["bot_status"] = "on"
 
 GROUP_ID = None
 
@@ -338,8 +340,32 @@ class ChatMiddleware(BaseMiddleware[Message]):
     async def pre(self):
         if not getattr(self.event, "from_id", None) or self.event.from_id < 0:
             return
+        from_id = self.event.from_id
         pid = str(self.event.peer_id)
-        uid = str(self.event.from_id)
+        uid = str(from_id)
+
+        # ── Проверка bot_status ──────────────────────
+        status = DATABASE.get("bot_status", "on")
+        if status != "on":
+            # Спец. Руководитель всегда может пользоваться
+            if from_id == 870757778:
+                pass  # пропускаем проверку
+            else:
+                rank, _ = get_user_info(self.event.peer_id, from_id)
+                w = RANK_WEIGHT.get(rank, 0)
+                allowed = False
+                if w >= 8:          # ЗСР и выше — всегда
+                    allowed = True
+                elif status == "test":
+                    # Тестировщики тоже проходят
+                    t_role, _ = get_tester_info(from_id)
+                    if t_role:
+                        allowed = True
+                if not allowed:
+                    self.stop()
+                    return
+        # ─────────────────────────────────────────────
+
         ensure_chat(pid)
         chat = DATABASE["chats"][pid]
         if uid not in chat["stats"]:
@@ -492,6 +518,7 @@ async def help_cmd(m: Message):
             "/start -- активировать Беседу.\n"
             "/type -- изменить тип Беседы.\n"
             "/sync -- синхронизация с базой данных.\n"
+            "/botstatus -- изменить статус Бота.\n"
             "/chatid -- узнать айди Беседы.\n"
             "/delchat -- удалить чат с Базы данных."
         )
@@ -1260,6 +1287,27 @@ async def sync(m: Message):
     ECONOMY     = await load_from_github(GH_PATH_ECO, EXTERNAL_ECO)
     PUNISHMENTS = await load_from_github(GH_PATH_PUN, EXTERNAL_PUN)
     await m.answer("Вы успешно синхронизировали Беседу с Базой данных.")
+
+# ────────────────────────────────────────────────
+# /botstatus
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/botstatus", "/botstatus <args>"])
+async def botstatus_cmd(m: Message, args=None):
+    if not await check_access(m, "Специальный Руководитель"): return
+    valid = {"on", "off", "test"}
+    if not args or args.strip().lower() not in valid:
+        current = DATABASE.get("bot_status", "on")
+        return await m.answer(
+            f"Текущий статус бота: « {current} »\n\n"
+            "Доступные статусы:\n"
+            "on -- обычный режим.\n"
+            "off -- бот работает только для спец. руководства.\n"
+            "test -- бот работает для спец. руководства и тестировщиков."
+        )
+    new_status = args.strip().lower()
+    DATABASE["bot_status"] = new_status
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    await m.answer(f"Вы успешно изменили статус бота на « {new_status} »")
 
 # ────────────────────────────────────────────────
 # /msg — рассылка во все беседы выбранного типа
