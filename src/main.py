@@ -475,6 +475,7 @@ async def help_cmd(m: Message):
             "/addozsr -- выдать права основного заместителя спец. руководителя.\n"
             "/start -- активировать Беседу.\n"
             "/type -- изменить тип Беседы.\n"
+            "/typetex -- изменить технический тип Беседы.\n"
             "/sync -- синхронизация с базой данных.\n"
             "/botstatus -- изменить статус Бота.\n"
             "/chatid -- узнать айди Беседы.\n"
@@ -1190,7 +1191,7 @@ async def type_cmd(m: Message, args=None):
     if not await check_access(m, "Специальный Руководитель"): return
     pid   = str(m.peer_id)
     ensure_chat(pid)
-    valid = ["def", "adm", "mod", "pl", "test", "tex", "bug"]
+    valid = ["def", "adm", "mod", "pl", "test"]
     if args:
         new_type = args.strip().lower()
         if new_type in valid:
@@ -1207,7 +1208,30 @@ async def type_cmd(m: Message, args=None):
         "adm - Беседа администраторов\n"
         "mod - Беседа модераторов\n"
         "pl - Беседа игроков\n"
-        "test - Беседа тестировщиков\n"
+        "test - Беседа тестировщиков"
+    )
+
+# ────────────────────────────────────────────────
+# /typetex — технические типы бесед
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/typetex", "/typetex <args>"])
+async def typetex_cmd(m: Message, args=None):
+    if not await check_access(m, "Специальный Руководитель"): return
+    pid   = str(m.peer_id)
+    ensure_chat(pid)
+    valid = ["tex", "bug"]
+    if args:
+        new_type = args.strip().lower()
+        if new_type in valid:
+            DATABASE["chats"][pid]["type"] = new_type
+            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+            await m.answer(f"Технический тип Беседы изменён на: {new_type}")
+            return
+        else:
+            await m.answer("Неверный тип. Доступные технические типы смотри ниже.")
+    current = DATABASE["chats"][pid]["type"]
+    await m.answer(
+        f"Беседа имеет тип: {current}\n\n"
         "tex - Тех. Раздел\n"
         "bug - Баг-трекер"
     )
@@ -1423,21 +1447,43 @@ async def thelp_cmd(m: Message):
         return await m.answer("Эта команда доступна только в беседе тестировщиков.")
     if not t_role and RANK_WEIGHT.get(my_global, 0) < 8:
         return await m.answer("Недостаточно прав!")
-    await m.answer(
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    w_global = RANK_WEIGHT.get(my_global, 0)
+    t_w = TESTER_RANK_WEIGHT.get(t_role, 0)
+
+    # Базовые команды — доступны всем тестировщикам
+    msg = (
         "Команды тестировщиков:\n"
         "/tstats -- статистика тестировщика.\n"
         "/tstaff -- команда тестировщиков.\n"
-        "/bug -- отчет багов.\n\n"
-        "Команды старших тестировщиков:\n"
-        "Отсутствуют.\n\n"
-        "Команды главного тестировщика:\n"
-        "/addtester -- выдать права тестировщика.\n"
-        "/addsentester -- выдать права старшего тестировщика.\n\n"
-        "Команды спец. Руководства:\n"
-        "/addgt -- выдать права главного тестировщика.\n"
-        "/type test -- сменить тип беседы, на беседу тестировщиков.\n"
-        "/type bug -- сменить тип беседы, на Баг-трекер."
+        "/bug -- отчет багов."
     )
+
+    # Старший тестировщик и выше
+    if t_w >= 2 or w_global >= 8:
+        msg += (
+            "\n\nКоманды старших тестировщиков:\n"
+            "Отсутствуют."
+        )
+
+    # Главный тестировщик и выше
+    if t_w >= 3 or w_global >= 8:
+        msg += (
+            "\n\nКоманды главного тестировщика:\n"
+            "/addtester -- выдать права тестировщика.\n"
+            "/addsentester -- выдать права старшего тестировщика."
+        )
+
+    # Спец. руководство
+    if w_global >= 8:
+        msg += (
+            "\n\nКоманды спец. Руководства:\n"
+            "/addgt -- выдать права главного тестировщика.\n"
+            "/typetex test -- сменить тип беседы, на беседу тестировщиков.\n"
+            "/typetex bug -- сменить тип беседы, на Баг-трекер."
+        )
+
+    await m.answer(msg)
 
 @bot.on.message(text=["/tstats", "/tstats <args>"])
 async def tstats_cmd(m: Message, args=None):
@@ -1491,7 +1537,7 @@ async def bug_cmd(m: Message, args=None):
     # В репорте всегда надпись MANLIX
     now = datetime.datetime.now(TZ_MSK)
     report = (
-        f"…::: BAG REPORT :::…\n\n"
+        f"…::: BUG REPORT :::…\n\n"
         f"| Тестировщик: [id{m.from_id}|MANLIX]\n"
         f"| Время: {now.strftime('%H:%M:%S')}\n"
         f"| Дата: {now.strftime('%d/%m/%Y')}\n\n"
