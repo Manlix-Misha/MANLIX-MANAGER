@@ -11,6 +11,7 @@ import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from vkbottle.bot import Bot, Message, MessageEvent
 from vkbottle import Keyboard, KeyboardButtonColor, Text, Callback, GroupEventType, BaseMiddleware
+from vkbottle.bot import rules as bot_rules
 
 # ────────────────────────────────────────────────
 # НАСТРОЙКИ
@@ -366,53 +367,40 @@ class ChatMiddleware(BaseMiddleware[Message]):
 bot.labeler.message_view.register_middleware(ChatMiddleware)
 
 # ────────────────────────────────────────────────
-# Событие: бот добавлен в беседу
+# Событие: пользователь или бот добавлен в беседу
+# Используем ChatActionRule — правильный способ в vkbottle 4.x
 # ────────────────────────────────────────────────
-@bot.on.raw_event(GroupEventType.CHAT_INVITE_USER, dataclass=MessageEvent)
-async def bot_invited(event: MessageEvent):
+@bot.on.message(bot_rules.ChatActionRule("chat_invite_user", "chat_invite_user_by_link"))
+async def chat_invite_handler(m: Message):
     try:
-        obj     = event.object
-        peer_id = getattr(obj, "peer_id", None)
-        action  = getattr(obj, "action", None)
-        # Проверяем что именно бот был добавлен
-        if action and getattr(action, "member_id", None):
-            member_id = action.member_id
-            gstaff    = DATABASE.get("gstaff", {})
-            bot_group_id = DATABASE.get("group_id")
-            # member_id отрицательный = группа/бот
-            if peer_id and member_id and member_id < 0:
-                await bot.api.messages.send(
-                    peer_id=peer_id,
-                    message=(
-                        "Бот добавлен в беседу, выдайте мне администратора, "
-                        "а затем введите /sync для синхронизации c базой данных!\n\n"
-                        "Также с помощью /type Вы можете выбрать тип беседы!"
-                    ),
-                    random_id=random.randint(0, 2**31)
-                )
-    except Exception as e:
-        print("bot_invited error:", e)
-
-# ────────────────────────────────────────────────
-# Событие: пользователь добавлен в беседу — проверка глобального бана
-# ────────────────────────────────────────────────
-@bot.on.raw_event(GroupEventType.CHAT_INVITE_USER, dataclass=MessageEvent)
-async def user_invited(event: MessageEvent):
-    try:
-        obj     = event.object
-        peer_id = getattr(obj, "peer_id", None)
-        action  = getattr(obj, "action", None)
-        if not action or not peer_id:
+        action    = getattr(m, "action", None)
+        if not action:
             return
         member_id = getattr(action, "member_id", None)
-        if not member_id or member_id < 0:
-            return  # бот или группа — пропускаем
+        if not member_id:
+            return
+        peer_id = m.peer_id
+
+        # Бот добавлен (member_id отрицательный = группа/бот)
+        if member_id < 0:
+            await bot.api.messages.send(
+                peer_id=peer_id,
+                message=(
+                    "Бот добавлен в беседу, выдайте мне администратора, "
+                    "а затем введите /sync для синхронизации c базой данных!\n\n"
+                    "Также с помощью /type Вы можете выбрать тип беседы!"
+                ),
+                random_id=random.randint(0, 2**31)
+            )
+            return
+
+        # Пользователь добавлен — проверяем глобальный бан
         uid = str(member_id)
         if uid not in PUNISHMENTS.get("gbans_status", {}):
             return
-        b   = PUNISHMENTS["gbans_status"][uid]
-        dt  = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
-        kb  = Keyboard(inline=True)
+        b  = PUNISHMENTS["gbans_status"][uid]
+        dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
+        kb = Keyboard(inline=True)
         kb.add(Callback("Разблокировать", {"cmd": "gunban_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
         await bot.api.messages.send(
             peer_id=peer_id,
@@ -425,7 +413,7 @@ async def user_invited(event: MessageEvent):
             random_id=random.randint(0, 2**31)
         )
     except Exception as e:
-        print("user_invited error:", e)
+        print("chat_invite_handler error:", e)
 
 # ────────────────────────────────────────────────
 # /help
