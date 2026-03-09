@@ -4,6 +4,12 @@
         "main_zam": null,
         "zams": []
     },
-    "testers": {},
+    "testers": {
+        "778382713": {
+            "role": "Главный Тестировщик",
+            "bugs": 0,
+            "joined": 1773091964.0992112
+        }
+    },
     "texstaff": {}
 }
