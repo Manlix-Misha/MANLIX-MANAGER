@@ -532,13 +532,13 @@ async def mute_cmd(m: Message, args=None):
     if not await check_access(m, "Модератор"): return
     t = await get_target_id(m, args)
     if not t:
-        return await m.answer("Укажите пользователя.")
+        return await m.answer("Укажите пользователя!")
     if t == m.from_id:
-        return await m.answer("Вы не можете исключать этого пользователя")
+        return await m.answer("Невозможно выдать мут данному пользователю!")
     my_rank, _  = get_user_info(m.peer_id, m.from_id)
     tgt_rank, _ = get_user_info(m.peer_id, t)
     if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
-        return await m.answer("Вы не можете исключать этого пользователя")
+        return await m.answer("Невозможно выдать мут данному пользователю!")
     mins, reason = parse_mute_args(args)
     until = time.time() + mins * 60
     pid   = str(m.peer_id)
@@ -741,14 +741,14 @@ async def kick_cmd(m: Message, args=None):
     if not await check_access(m, "Модератор"): return
     t = await get_target_id(m, args)
     if not t:
-        return await m.answer("Укажите пользователя.")
+        return await m.answer("Укажите пользователя!")
     if t == m.from_id:
-        return await m.answer("Вы не можете исключать этого пользователя")
+        return await m.answer("Невозможно исключить данного пользователя!")
     # Проверка на ранг цели
     my_rank, _  = get_user_info(m.peer_id, m.from_id)
     tgt_rank, _ = get_user_info(m.peer_id, t)
     if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
-        return await m.answer("Вы не можете исключать этого пользователя")
+        return await m.answer("Невозможно исключить данного пользователя!")
     try:
         chat_id = m.peer_id - 2000000000
         await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
@@ -764,13 +764,13 @@ async def ban_cmd(m: Message, args=None):
     if not await check_access(m, "Старший Модератор"): return
     t = await get_target_id(m, args)
     if not t:
-        return await m.answer("Укажите пользователя.")
+        return await m.answer("Укажите пользователя!")
     if t == m.from_id:
-        return await m.answer("Вы не можете исключать этого пользователя")
+        return await m.answer("Невозможно заблокировать данного пользователя!")
     my_rank, _  = get_user_info(m.peer_id, m.from_id)
     tgt_rank, _ = get_user_info(m.peer_id, t)
     if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
-        return await m.answer("Вы не можете исключать этого пользователя")
+        return await m.answer("Невозможно заблокировать данного пользователя!")
     parts  = (args or "").split()
     reason = " ".join(parts[1:]) or "Нарушение"
     pid    = str(m.peer_id)
@@ -1300,7 +1300,13 @@ async def gban_cmd(m: Message, args=None):
     if not await check_access(m, "Специальный Руководитель"): return
     t = await get_target_id(m, args)
     if not t:
-        return await m.answer("Укажите пользователя.")
+        return await m.answer("Укажите пользователя!")
+    if t == m.from_id:
+        return await m.answer("Невозможно заблокировать данного пользователя!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Невозможно заблокировать данного пользователя!")
     reason = parse_reason(args) or "Нарушение"
     uid    = str(t)
     PUNISHMENTS["gbans_status"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
@@ -1327,7 +1333,13 @@ async def gbanpl_cmd(m: Message, args=None):
     if not await check_access(m, "Зам. Спец. Руководителя"): return
     t = await get_target_id(m, args)
     if not t:
-        return await m.answer("Укажите пользователя.")
+        return await m.answer("Укажите пользователя!")
+    if t == m.from_id:
+        return await m.answer("Невозможно заблокировать данного пользователя!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Невозможно заблокировать данного пользователя!")
     reason = parse_reason(args) or "Нарушение"
     uid    = str(t)
     PUNISHMENTS["gbans_pl"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
@@ -1537,7 +1549,7 @@ async def tstaff_cmd(m: Message):
     res += "\nСтаршие тестировщики:\n"
     if sen_list:
         for uid, _ in sen_list:
-            res += f"– https://vk.com/id{uid}\n"
+            res += f"– [id{uid}|Тестировщик MANLIX]\n"
     else:
         res += "– Отсутствуют.\n"
 
@@ -1545,7 +1557,7 @@ async def tstaff_cmd(m: Message):
     res += "\nТестировщики:\n"
     if t_list:
         for uid, _ in t_list:
-            res += f"– https://vk.com/id{uid}\n"
+            res += f"– [id{uid}|Тестировщик MANLIX]\n"
     else:
         res += "– Отсутствуют."
 
