@@ -324,7 +324,7 @@ async def get_display_name(user_id: int, peer_id=None, use_nick=True):
         if nick:
             return nick
     try:
-        uinfo = await bot.api.users.get([int(user_id)])
+        uinfo = await bot.api.users.get(user_ids=[int(user_id)])
         if uinfo and len(uinfo) > 0:
             return f"{uinfo[0].first_name} {uinfo[0].last_name}"
         return f"id{user_id}"
@@ -649,7 +649,7 @@ async def all_buttons(event: MessageEvent):
                 del DATABASE["chats"][pid]["mutes"][uid]
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
             try:
-                u_info = await bot.api.users.get([int(uid)])
+                u_info = await bot.api.users.get(user_ids=[int(uid)])
                 u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
             except:
                 u_name = "пользователю"
@@ -682,7 +682,7 @@ async def all_buttons(event: MessageEvent):
             except Exception as e:
                 print("clear_msg error:", e)
             try:
-                u_info2 = await bot.api.users.get([int(uid)])
+                u_info2 = await bot.api.users.get(user_ids=[int(uid)])
                 u_name2 = f"{u_info2[0].first_name} {u_info2[0].last_name}"
             except:
                 u_name2 = "пользователя"
@@ -751,12 +751,12 @@ async def all_buttons(event: MessageEvent):
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
             # Получаем имена из ВК
             try:
-                w_info = await bot.api.users.get([int(winner)])
+                w_info = await bot.api.users.get(user_ids=[int(winner)])
                 w_name = f"{w_info[0].first_name} {w_info[0].last_name}"
             except:
                 w_name = "победитель"
             try:
-                l_info = await bot.api.users.get([int(loser)])
+                l_info = await bot.api.users.get(user_ids=[int(loser)])
                 l_name = f"{l_info[0].first_name} {l_info[0].last_name}"
             except:
                 l_name = "проигравший"
@@ -1012,7 +1012,7 @@ async def staff_view(m: Message):
                     display = nick
                 else:
                     try:
-                        uinfo   = await bot.api.users.get([int(u)])
+                        uinfo   = await bot.api.users.get(user_ids=[int(u)])
                         display = f"{uinfo[0].first_name} {uinfo[0].last_name}"
                     except:
                         display = "пользователь"
@@ -1062,12 +1062,13 @@ async def setnick(m: Message, args=None):
     pid, uid    = str(m.peer_id), str(t)
     ensure_chat(pid)
     role_now, _ = get_user_info(m.peer_id, t)
+    # Получаем имена ДО сохранения ника, иначе t_display вернёт только что выданный ник
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     # Ник можно выдать любому включая владельца.
     # В /staff владелец всегда отображается как MANLIX MANAGER (независимо от ника)
     DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|{t_display}]: {new_nick}")
 
 # ────────────────────────────────────────────────
@@ -1123,7 +1124,7 @@ async def getban_cmd(m: Message, args=None):
         return await m.answer("Укажите пользователя.")
     uid = str(t)
     try:
-        uinfo = await bot.api.users.get([t])
+        uinfo = await bot.api.users.get(user_ids=[t])
         name  = f"{uinfo[0].first_name} {uinfo[0].last_name}"
     except:
         name = "пользователь"
