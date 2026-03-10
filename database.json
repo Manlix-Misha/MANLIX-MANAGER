@@ -508,11 +508,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 2,
-                    "last": 1773163848.984889
+                    "count": 3,
+                    "last": 1773163854.612062
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false
         }
     },
