@@ -427,7 +427,9 @@ async def help_cmd(m: Message):
             "/setnick -- установить имя пользователю.\n"
             "/rnick -- удалить имя пользователю.\n"
             "/nlist -- список пользователей с ником.\n"
-            "/getban -- информация о Блокировках."
+            "/getban -- информация о Блокировках.\n"
+            "/warn -- выдать предупреждение.\n"
+            "/unwarn -- снять предупреждение."
         )
     if w >= 2:
         res += (
@@ -721,6 +723,37 @@ async def all_buttons(event: MessageEvent):
         await snackbar("Пользователь разблокирован")
         return
 
+    # ── Кнопка снять варн ────────────────────────
+    if cmd == "unwarn_btn":
+        uid = str(payload.get("uid", ""))
+        pid_s = str(peer_id)
+        rank, _ = get_user_info(peer_id, actor_id)
+        if RANK_WEIGHT.get(rank, 0) < 1:
+            await snackbar("Недостаточно прав")
+            return
+        warns = PUNISHMENTS.get("warns", {}).get(pid_s, {})
+        if uid in warns and warns[uid] > 0:
+            warns[uid] -= 1
+            if warns[uid] == 0:
+                del warns[uid]
+            await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+        try:
+            u_info = await bot.api.users.get(user_ids=[int(uid)])
+            u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
+        except:
+            u_name = "пользователю"
+        try:
+            await bot.api.request("messages.edit", {
+                "peer_id": peer_id,
+                "conversation_message_id": cmid,
+                "message": f"[id{actor_id}|Модератор MANLIX] снял(-а) предупреждение [id{uid}|пользователю]",
+                "keyboard": EMPTY_KB_JSON
+            })
+        except Exception as e:
+            print("unwarn_btn edit error:", e)
+        await snackbar("Предупреждение снято")
+        return
+
     # ── Кнопка дуэли ─────────────────────────────
     if cmd == "join_duel":
         duel_id = payload.get("duel")
@@ -845,6 +878,59 @@ async def unban_cmd(m: Message, args=None):
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
+
+# ────────────────────────────────────────────────
+# /warn / /unwarn
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/warn", "/warn <args>"])
+async def warn_cmd(m: Message, args=None):
+    if not await check_access(m, "Модератор"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    if t == m.from_id:
+        return await m.answer("Невозможно выдать предупреждение данному пользователю!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Невозможно выдать предупреждение данному пользователю!")
+    reason = parse_reason(args) or "Нарушение"
+    pid = str(m.peer_id)
+    uid = str(t)
+    if "warns" not in PUNISHMENTS:
+        PUNISHMENTS["warns"] = {}
+    if pid not in PUNISHMENTS["warns"]:
+        PUNISHMENTS["warns"][pid] = {}
+    current = PUNISHMENTS["warns"][pid].get(uid, 0) + 1
+    PUNISHMENTS["warns"][pid][uid] = current
+    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    kb = Keyboard(inline=True)
+    kb.row()
+    kb.add(Callback("Снять варн", {"cmd": "unwarn_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
+    kb.add(Callback("Очистить",   {"cmd": "clear_msg",  "uid": uid}), color=KeyboardButtonColor.NEGATIVE)
+    await m.answer(
+        f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|пользователю]\n\n"
+        f"| Причина: {reason}\n"
+        f"| Кол-во предупреждений: {current}/3",
+        keyboard=kb.get_json()
+    )
+
+@bot.on.message(text=["/unwarn", "/unwarn <args>"])
+async def unwarn_cmd(m: Message, args=None):
+    if not await check_access(m, "Модератор"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    pid = str(m.peer_id)
+    uid = str(t)
+    warns = PUNISHMENTS.get("warns", {}).get(pid, {})
+    if uid in warns and warns[uid] > 0:
+        warns[uid] -= 1
+        if warns[uid] == 0:
+            del warns[uid]
+        await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) предупреждение [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # Выдача ролей
@@ -1508,7 +1594,8 @@ async def thelp_cmd(m: Message):
         msg += (
             "\n\nКоманды главного тестировщика:\n"
             "/addtester -- выдать права тестировщика.\n"
-            "/addsentester -- выдать права старшего тестировщика."
+            "/addsentester -- выдать права старшего тестировщика.\n"
+            "/removetester -- забрать права тестировщика."
         )
 
     # Спец. руководство
@@ -1681,6 +1768,30 @@ async def addgt_cmd(m: Message, args=None):
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [id{t}|пользователю]")
+
+@bot.on.message(text=["/removetester", "/removetester <args>"])
+async def removetester_cmd(m: Message, args=None):
+    # Доступно Главному тестировщику и выше
+    t_role, _ = get_tester_info(m.from_id)
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    has_access = (
+        TESTER_RANK_WEIGHT.get(t_role, 0) >= TESTER_RANK_WEIGHT.get("Главный Тестировщик", 0)
+        or RANK_WEIGHT.get(my_global, 0) >= 8
+    )
+    if not has_access:
+        return await m.answer("Недостаточно прав!")
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    if t == m.from_id:
+        return await m.answer("Вы не можете снять права у самого себя!")
+    uid = str(t)
+    if uid not in STAFF.get("testers", {}):
+        return await m.answer("У этого пользователя нет прав тестировщика.")
+    del STAFF["testers"][uid]
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|{a_display}] забрал(-а) права тестировщика [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # Игровые команды
