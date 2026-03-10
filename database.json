@@ -484,11 +484,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 2,
-                    "last": 1773161312.915947
+                    "count": 3,
+                    "last": 1773161318.802794
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false
         }
     },
