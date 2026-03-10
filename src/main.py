@@ -864,8 +864,7 @@ async def role_grant(m: Message, args, min_rank, role_name, role_label):
     await set_role_in_chat(pid, uid, role_name)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|пользователю]")
 
 @bot.on.message(text=["/addmoder",    "/addmoder <args>"])
 async def addmod(m: Message, args=None):
@@ -912,8 +911,7 @@ async def addzsr(m: Message, args=None):
         gstaff["zams"].append(t)
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [id{t}|пользователю]")
 
 @bot.on.message(text=["/addozsr", "/addozsr <args>"])
 async def addozsr(m: Message, args=None):
@@ -927,8 +925,7 @@ async def addozsr(m: Message, args=None):
     STAFF["gstaff"]["main_zam"] = t
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя специального руководителя [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя специального руководителя [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # /removerole
@@ -945,8 +942,7 @@ async def removerole(m: Message, args=None):
         del DATABASE["chats"][pid]["staff"][uid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # /gunrole — снять глобальную роль (зам, основной зам)
@@ -982,8 +978,7 @@ async def gunrole_cmd(m: Message, args=None):
         return await m.answer("У этого пользователя нет глобальных прав.")
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # /staff
@@ -1015,8 +1010,8 @@ async def staff_view(m: Message):
                         uinfo   = await bot.api.users.get(user_ids=[int(u)])
                         display = f"{uinfo[0].first_name} {uinfo[0].last_name}"
                     except:
-                        display = "пользователь"
-                members.append(f"– https://vk.com/id{u}")
+                        display = f"id{u}"
+                members.append(f"– [id{u}|{display}]")
         if r == "Владелец":
             owner_ids = [u for u, entry in staff.items() if entry[0] == "Владелец"]
             if owner_ids:
@@ -1069,7 +1064,7 @@ async def setnick(m: Message, args=None):
     # В /staff владелец всегда отображается как MANLIX MANAGER (независимо от ника)
     DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|{t_display}]: {new_nick}")
+    await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
 
 # ────────────────────────────────────────────────
 # /rnick — ИСПРАВЛЕНО: поддержка reply
@@ -1088,8 +1083,7 @@ async def rnick(m: Message, args=None):
         DATABASE["chats"][pid]["staff"][uid][1] = None
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # /nlist
@@ -1477,8 +1471,7 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
         STAFF["testers"][uid]["role"] = role_name
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|пользователю]")
 
 @bot.on.message(text="/thelp")
 async def thelp_cmd(m: Message):
@@ -1688,8 +1681,7 @@ async def addgt_cmd(m: Message, args=None):
         STAFF["testers"][uid]["role"] = "Главный Тестировщик"
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # Игровые команды
