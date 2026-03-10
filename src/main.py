@@ -1124,8 +1124,7 @@ async def getban_cmd(m: Message, args=None):
         name = "пользователь"
 
     # Строчный регистр в заголовке — требование пользователя
-    t_name = await get_display_name(t, peer_id=m.peer_id)
-    ans = f"Информация о блокировках [id{t}|{t_name}]\n"
+    ans = f"Информация о блокировках [id{t}|пользователя]\n"
 
     # Глобальный бан в беседах
     if uid in PUNISHMENTS.get("gbans_status", {}):
