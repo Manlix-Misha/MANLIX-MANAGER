@@ -179,6 +179,8 @@ def ensure_chat(pid: str):
     for key in ("mutes", "stats", "staff"):
         if key not in chat:
             chat[key] = {}
+    if "invite_only" not in chat:
+        chat["invite_only"] = False
 
 def is_vk_ref(token: str) -> bool:
     """Проверяет, является ли токен ссылкой/упоминанием/ID пользователя ВК."""
@@ -455,7 +457,8 @@ async def help_cmd(m: Message):
     if w >= 7:
         res += (
             "\n\nКоманды владельца:\n"
-            "/addsa -- выдать права специального администратора."
+            "/addsa -- выдать права специального администратора.\n"
+            "/invite -- управление добавлением участников."
         )
     await m.answer(res)
     if w >= 8:
@@ -717,8 +720,8 @@ async def all_buttons(event: MessageEvent):
         if len(duel["participants"]) >= 2:
             await snackbar("Дуэль уже заполнена.")
             return
-        if uid not in ECONOMY or ECONOMY[uid].get("bank", 0) < duel["amount"]:
-            await snackbar("Недостаточно средств на банковском счете.")
+        if uid not in ECONOMY or ECONOMY[uid].get("cash", 0) < duel["amount"]:
+            await snackbar("Недостаточно наличных средств.")
             return
         duel["participants"].append(uid)
         await snackbar("Вы вступили в дуэль!")
@@ -726,17 +729,28 @@ async def all_buttons(event: MessageEvent):
             winner = random.choice(duel["participants"])
             loser  = [p for p in duel["participants"] if p != winner][0]
             amount = duel["amount"]
-            ECONOMY[winner]["bank"] = ECONOMY[winner].get("bank", 0) + amount
-            ECONOMY[loser]["bank"]  = ECONOMY[loser].get("bank",  0) - amount
+            ECONOMY[winner]["cash"] = ECONOMY[winner].get("cash", 0) + amount
+            ECONOMY[loser]["cash"]  = ECONOMY[loser].get("cash",  0) - amount
             await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
             del DATABASE["duels"][duel_id]
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+            # Получаем имена из ВК
+            try:
+                w_info = await bot.api.users.get([int(winner)])
+                w_name = f"{w_info[0].first_name} {w_info[0].last_name}"
+            except:
+                w_name = "победитель"
+            try:
+                l_info = await bot.api.users.get([int(loser)])
+                l_name = f"{l_info[0].first_name} {l_info[0].last_name}"
+            except:
+                l_name = "проигравший"
             await bot.api.messages.send(
                 peer_id=int(duel["chat_id"]),
                 message=(
                     f"⚔️ Дуэль завершена!\n\n"
-                    f"🏅 Победил: [id{winner}|победитель]\n"
-                    f"🥈 Проиграл: [id{loser}|проигравший]\n\n"
+                    f"🏅 Победил: [id{winner}|{w_name}]\n"
+                    f"🥈 Проиграл: [id{loser}|{l_name}]\n\n"
                     f"💲 Победитель получает {amount}$"
                 ),
                 random_id=random.randint(0, 2**31)
@@ -1025,8 +1039,9 @@ async def setnick(m: Message, args=None):
     pid, uid    = str(m.peer_id), str(t)
     ensure_chat(pid)
     role_now, _ = get_user_info(m.peer_id, t)
-    # Владельцу нельзя менять ник — он всегда MANLIX MANAGER в /staff
-    if role_now == "Владелец":
+    # Владелец может менять НИК СЕБЕ (но в /staff всё равно "MANLIX MANAGER")
+    # Нельзя менять ник ЧУЖОМУ владельцу (только если сам не владелец)
+    if role_now == "Владелец" and t != m.from_id:
         return await m.answer("Нельзя изменить имя владельца беседы.")
     DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
@@ -1305,13 +1320,13 @@ async def msg_cmd(m: Message, args=None):
     text      = parts[1] if len(parts) > 1 else ""
     if not text:
         return await m.answer("Укажите текст сообщения.")
-    valid_types = ["def", "adm", "mod", "pl", "test", "tex", "bug"]
+    valid_types = ["def", "adm", "mod", "pl", "test", "tex", "bug", "all"]
     if chat_type not in valid_types:
         return await m.answer(f"Неверный тип. Доступные: {', '.join(valid_types)}")
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id, use_nick=False)
     sent = 0
     for pid_c, chat in list(DATABASE.get("chats", {}).items()):
-        if chat.get("type") == chat_type:
+        if chat_type == "all" or chat.get("type") == chat_type:
             try:
                 await bot.api.messages.send(
                     peer_id=int(pid_c),
@@ -1657,7 +1672,8 @@ async def ghelp_cmd(m: Message):
         "📥 /положить [сумма] — Положить в банк\n"
         "📤 /снять [сумма] — Снять из банка\n"
         "💸 /перевести [ссылка] [сумма] — Перевод со счета на счет\n"
-        "🎰 /roulette [сумма] — Рулетка"
+        "🎰 /roulette [сумма] — Рулетка\n"
+        "⚔️ /duel [сумма] — Дуэль (наличные)"
     )
 
 @bot.on.message(text="/prise")
@@ -1779,8 +1795,8 @@ async def duel_create(m: Message, amount=None):
         return await m.answer("Укажите положительную сумму.")
     uid = str(m.from_id)
     pid = str(m.peer_id)
-    if uid not in ECONOMY or ECONOMY[uid].get("bank", 0) < amount:
-        return await m.answer("Недостаточно средств на банковском счете.")
+    if uid not in ECONOMY or ECONOMY[uid].get("cash", 0) < amount:
+        return await m.answer("Недостаточно наличных средств.")
     duel_id = f"{pid}_{int(time.time())}"
     DATABASE["duels"][duel_id] = {
         "creator":      uid,
@@ -1796,6 +1812,23 @@ async def duel_create(m: Message, amount=None):
         keyboard=kb
     )
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+
+# ────────────────────────────────────────────────
+# /invite — доступ к добавлению только для модерации
+# ────────────────────────────────────────────────
+@bot.on.message(text="/invite")
+async def invite_cmd(m: Message):
+    if not await check_access(m, "Владелец"): return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    current = DATABASE["chats"][pid].get("invite_only", False)
+    DATABASE["chats"][pid]["invite_only"] = not current
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    if not current:
+        await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) функцию добавления только модерацией!")
+    else:
+        await m.answer(f"[id{m.from_id}|{a_display}] отключил(-а) функцию добавления только модерацией!")
 
 # ────────────────────────────────────────────────
 # Системные события
@@ -1839,6 +1872,17 @@ async def actions(m: Message):
         uid = str(invited)
         pid = str(m.peer_id)
         ensure_chat(pid)
+
+        # Проверяем invite_only — добавлять может только модерация (ранг >= 1)
+        if DATABASE["chats"][pid].get("invite_only", False):
+            inviter_rank, _ = get_user_info(m.peer_id, m.from_id)
+            if RANK_WEIGHT.get(inviter_rank, 0) < 1:
+                try:
+                    chat_id = m.peer_id - 2000000000
+                    await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=invited)
+                except:
+                    pass
+                return
 
         # Проверяем глобальный бан
         if uid in PUNISHMENTS.get("gbans_status", {}):
