@@ -317,17 +317,20 @@ async def get_display_name(user_id: int, peer_id=None, use_nick=True):
     Возвращает отображаемое имя пользователя:
     1. Ник из бота (если установлен через /setnick и use_nick=True)
     2. Имя и фамилия из профиля ВК
-    3. Fallback: "пользователь"
+    3. Fallback: "id{user_id}" (чтобы хоть что-то было вместо "пользователь")
     """
     if use_nick and peer_id:
         _, nick = get_user_info(peer_id, user_id)
         if nick:
             return nick
     try:
-        uinfo = await bot.api.users.get([user_id])
-        return f"{uinfo[0].first_name} {uinfo[0].last_name}"
-    except:
-        return "пользователь"
+        uinfo = await bot.api.users.get([int(user_id)])
+        if uinfo and len(uinfo) > 0:
+            return f"{uinfo[0].first_name} {uinfo[0].last_name}"
+        return f"id{user_id}"
+    except Exception as e:
+        print(f"get_display_name error for {user_id}: {e}")
+        return f"id{user_id}"
 
 async def check_access(m: Message, min_rank: str):
     rank, _ = get_user_info(m.peer_id, m.from_id)
@@ -557,7 +560,7 @@ async def mute_cmd(m: Message, args=None):
     ensure_chat(pid)
     DATABASE["chats"][pid]["mutes"][str(t)] = until
     dt = datetime.datetime.fromtimestamp(until, TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     kb = Keyboard(inline=True)
     kb.row()
     kb.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": str(t)}), color=KeyboardButtonColor.POSITIVE)
@@ -584,7 +587,7 @@ async def unmute_cmd(m: Message, args=None):
     if str(t) in DATABASE["chats"][pid].get("mutes", {}):
         del DATABASE["chats"][pid]["mutes"][str(t)]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) мут [id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
@@ -789,7 +792,7 @@ async def kick_cmd(m: Message, args=None):
         await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
     except Exception as e:
         print("kick error:", e)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] исключил(-а) [id{t}|{t_display}] из Беседы.")
 
 # ────────────────────────────────────────────────
@@ -824,7 +827,7 @@ async def ban_cmd(m: Message, args=None):
     except:
         pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
 
 # ────────────────────────────────────────────────
@@ -840,7 +843,7 @@ async def unban_cmd(m: Message, args=None):
     if pid in PUNISHMENTS["bans"] and str(t) in PUNISHMENTS["bans"][pid]:
         del PUNISHMENTS["bans"][pid][str(t)]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
 
 # ────────────────────────────────────────────────
@@ -861,7 +864,7 @@ async def role_grant(m: Message, args, min_rank, role_name, role_label):
     await set_role_in_chat(pid, uid, role_name)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|{t_display}]")
 
 @bot.on.message(text=["/addmoder",    "/addmoder <args>"])
@@ -909,7 +912,7 @@ async def addzsr(m: Message, args=None):
         gstaff["zams"].append(t)
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [id{t}|{t_display}]")
 
 @bot.on.message(text=["/addozsr", "/addozsr <args>"])
@@ -924,7 +927,7 @@ async def addozsr(m: Message, args=None):
     STAFF["gstaff"]["main_zam"] = t
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя специального руководителя [id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
@@ -942,7 +945,7 @@ async def removerole(m: Message, args=None):
         del DATABASE["chats"][pid]["staff"][uid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
@@ -979,7 +982,7 @@ async def gunrole_cmd(m: Message, args=None):
         return await m.answer("У этого пользователя нет глобальных прав.")
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
@@ -1059,14 +1062,12 @@ async def setnick(m: Message, args=None):
     pid, uid    = str(m.peer_id), str(t)
     ensure_chat(pid)
     role_now, _ = get_user_info(m.peer_id, t)
-    # Владелец может менять НИК СЕБЕ (но в /staff всё равно "MANLIX MANAGER")
-    # Нельзя менять ник ЧУЖОМУ владельцу (только если сам не владелец)
-    if role_now == "Владелец" and t != m.from_id:
-        return await m.answer("Нельзя изменить имя владельца беседы.")
+    # Ник можно выдать любому включая владельца.
+    # В /staff владелец всегда отображается как MANLIX MANAGER (независимо от ника)
     DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|{t_display}]: {new_nick}")
 
 # ────────────────────────────────────────────────
@@ -1086,7 +1087,7 @@ async def rnick(m: Message, args=None):
         DATABASE["chats"][pid]["staff"][uid][1] = None
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
@@ -1128,7 +1129,7 @@ async def getban_cmd(m: Message, args=None):
         name = "пользователь"
 
     # Строчный регистр в заголовке — требование пользователя
-    t_name = await get_display_name(t)
+    t_name = await get_display_name(t, peer_id=m.peer_id)
     ans = f"Информация о блокировках [id{t}|{t_name}]\n"
 
     # Глобальный бан в беседах
@@ -1382,7 +1383,7 @@ async def gban_cmd(m: Message, args=None):
     uid    = str(t)
     PUNISHMENTS["gbans_status"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] занес [id{t}|{t_display}] в глобальную Блокировку Бота.")
 
 @bot.on.message(text=["/gunban", "/gunban <args>"])
@@ -1395,7 +1396,7 @@ async def gunban(m: Message, args=None):
     if uid in PUNISHMENTS["gbans_status"]:
         del PUNISHMENTS["gbans_status"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] вынес [id{t}|{t_display}] из Глобальной Блокировки Бота.")
 
 # ────────────────────────────────────────────────
@@ -1424,7 +1425,7 @@ async def gbanpl_cmd(m: Message, args=None):
             except:
                 pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] заблокировал(-а) [id{t}|{t_display}] во всех игровых Беседах.")
 
 @bot.on.message(text=["/gunbanpl", "/gunbanpl <args>"])
@@ -1437,7 +1438,7 @@ async def gunbanpl_cmd(m: Message, args=None):
     if uid in PUNISHMENTS["gbans_pl"]:
         del PUNISHMENTS["gbans_pl"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] разблокировал(-а) [id{t}|{t_display}] во всех игровых Беседах.")
 
 # ────────────────────────────────────────────────
@@ -1475,7 +1476,7 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
         STAFF["testers"][uid]["role"] = role_name
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|{t_display}]")
 
 @bot.on.message(text="/thelp")
@@ -1541,7 +1542,7 @@ async def tstats_cmd(m: Message, args=None):
     uid = str(t)
     role, bugs = get_tester_info(t)
     if not role:
-        t_name = await get_display_name(t)
+        t_name = await get_display_name(t, peer_id=m.peer_id)
         return await m.answer(f"[id{t}|{t_name}] не является тестировщиком.")
     now = datetime.datetime.now(TZ_MSK)
     await m.answer(
@@ -1686,7 +1687,7 @@ async def addgt_cmd(m: Message, args=None):
         STAFF["testers"][uid]["role"] = "Главный Тестировщик"
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
@@ -1794,7 +1795,7 @@ async def transfer(m: Message, args=None):
     ECONOMY[uid]["bank"] -= amount
     ECONOMY[rid]["bank"] += amount
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    t_display = await get_display_name(t)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"💲 Вы перевели [id{t}|{t_display}] {amount}$")
 
 @bot.on.message(text=["/roulette <amount>"])
