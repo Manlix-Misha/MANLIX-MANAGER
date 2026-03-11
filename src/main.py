@@ -430,8 +430,21 @@ class ChatMiddleware(BaseMiddleware[Message]):
 
         # ── Фильтр запрещённых слов ───────────────────
         if chat.get("filter_enabled", False):
-            rank, _ = get_user_info(self.event.peer_id, from_id)
-            if RANK_WEIGHT.get(rank, 0) < 1:
+            # Специальный Руководитель → фильтр не срабатывает
+            # Модератор и выше в ЭТОЙ беседе → фильтр не срабатывает
+            # Тестировщик (глобальная роль без роли в беседе) → срабатывает
+            # Обычный пользователь → срабатывает
+            gstaff_f    = STAFF.get("gstaff", {})
+            is_exempt   = (
+                from_id == 870757778
+                or from_id == gstaff_f.get("spec")
+                or from_id == gstaff_f.get("main_zam")
+                or from_id in gstaff_f.get("zams", [])
+            )
+            local_entry = chat.get("staff", {}).get(uid)
+            local_rank  = local_entry[0] if local_entry else "Пользователь"
+            local_w     = RANK_WEIGHT.get(local_rank, 0)
+            if not is_exempt and local_w < 1:
                 text_lower = (self.event.text or "").lower()
                 bad_words  = chat.get("filter_words", [])
                 hit = next((w for w in bad_words if w in text_lower), None)
@@ -564,7 +577,8 @@ async def help_cmd(m: Message):
             "/sync -- синхронизация с базой данных.\n"
             "/botstatus -- изменить статус Бота.\n"
             "/chatid -- узнать айди Беседы.\n"
-            "/delchat -- удалить чат с Базы данных."
+            "/delchat -- удалить чат с Базы данных.\n"
+            "/filterlist -- список запрещённых слов."
         )
         await m.answer(gres)
 
@@ -2138,8 +2152,10 @@ async def filter_cmd(m: Message, args=None):
         current = DATABASE["chats"][pid].get("filter_enabled", False)
         DATABASE["chats"][pid]["filter_enabled"] = not current
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        words = DATABASE["chats"][pid].get("filter_words", [])
+        words_info = f"\n| Слов в фильтре: {len(words)}" if words else "\n| Слов в фильтре: 0 (добавьте через /filter add [слово])"
         if not current:
-            await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) фильтр запрещённых слов!")
+            await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) фильтр запрещённых слов!{words_info}")
         else:
             await m.answer(f"[id{m.from_id}|{a_display}] выключил(-а) фильтр запрещённых слов!")
         return
@@ -2158,8 +2174,12 @@ async def filter_cmd(m: Message, args=None):
         if word not in words:
             words.append(word)
             DATABASE["chats"][pid]["filter_words"] = words
-            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer(f"[id{m.from_id}|{a_display}] добавил(-а) новое запрещённое слово в фильтр.")
+        # ФИКС: автоматически включаем фильтр если он был выключен
+        was_disabled = not DATABASE["chats"][pid].get("filter_enabled", False)
+        DATABASE["chats"][pid]["filter_enabled"] = True
+        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        extra = " (фильтр автоматически включён)" if was_disabled else ""
+        await m.answer(f"[id{m.from_id}|{a_display}] добавил(-а) новое запрещённое слово в фильтр{extra}.")
 
     elif subcmd == "del":
         # Только Основной ЗСР и выше
@@ -2176,6 +2196,24 @@ async def filter_cmd(m: Message, args=None):
 
     else:
         await m.answer("Неизвестная подкоманда. Используй: /filter, /filter add [слово], /filter del [слово]")
+
+# ────────────────────────────────────────────────
+# /filterlist — список запрещённых слов
+# ────────────────────────────────────────────────
+@bot.on.message(text="/filterlist")
+async def filterlist_cmd(m: Message):
+    if not await check_access(m, "Специальный Руководитель"): return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    words   = DATABASE["chats"][pid].get("filter_words", [])
+    enabled = DATABASE["chats"][pid].get("filter_enabled", False)
+    status  = "включён" if enabled else "выключен"
+    if not words:
+        return await m.answer(f"| Фильтр {status}\n| Список запрещённых слов: пуст")
+    msg = f"| Фильтр {status}\n| Список запрещённых слов:\n"
+    for w in words:
+        msg += f"-- {w}\n"
+    await m.answer(msg.strip())
 
 # ────────────────────────────────────────────────
 # Системные события
