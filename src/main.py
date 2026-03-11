@@ -356,6 +356,10 @@ async def set_role_in_chat(pid: str, uid: str, role_name: str):
 # ────────────────────────────────────────────────
 class ChatMiddleware(BaseMiddleware[Message]):
     async def pre(self):
+        # ФИКС: пропускаем системные события (добавление/исключение пользователей)
+        # Иначе quit_mode/filter удаляли системные сообщения и блокировали actions handler
+        if getattr(self.event, "action", None):
+            return
         if not getattr(self.event, "from_id", None) or self.event.from_id < 0:
             return
         from_id = self.event.from_id
@@ -432,7 +436,6 @@ class ChatMiddleware(BaseMiddleware[Message]):
                 bad_words  = chat.get("filter_words", [])
                 hit = next((w for w in bad_words if w in text_lower), None)
                 if hit:
-                    import random as _random
                     # Сохраняем cmid ДО удаления сообщения
                     cmid_filter = self.event.conversation_message_id
                     peer_filter  = self.event.peer_id
@@ -451,8 +454,12 @@ class ChatMiddleware(BaseMiddleware[Message]):
                                 f"за написание запрещённого слова."
                             ),
                             keyboard=kb_filter.get_json(),
-                            reply_to=cmid_filter,
-                            random_id=_random.randint(0, 2**31)
+                            forward=json.dumps({
+                                "peer_id": peer_filter,
+                                "conversation_message_ids": [cmid_filter],
+                                "is_reply": True
+                            }),
+                            random_id=random.randint(0, 2**31)
                         )
                     except Exception as e:
                         print("filter send error:", e)
