@@ -901,9 +901,25 @@ async def warn_cmd(m: Message, args=None):
         PUNISHMENTS["warns"] = {}
     if pid not in PUNISHMENTS["warns"]:
         PUNISHMENTS["warns"][pid] = {}
-    current = PUNISHMENTS["warns"][pid].get(uid, 0) + 1
+    current = min(PUNISHMENTS["warns"][pid].get(uid, 0) + 1, 3)
     PUNISHMENTS["warns"][pid][uid] = current
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    # При 3/3 — исключить из беседы
+    if current >= 3:
+        del PUNISHMENTS["warns"][pid][uid]
+        await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+        try:
+            chat_id = m.peer_id - 2000000000
+            await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
+        except Exception as e:
+            print("warn kick error:", e)
+        await m.answer(
+            f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|пользователю]\n\n"
+            f"| Причина: {reason}\n"
+            f"| Кол-во предупреждений: {current}/3\n\n"
+            f"[id{t}|Пользователь] исключен из Беседы из-за максимального количества предупреждений!"
+        )
+        return
     kb = Keyboard(inline=True)
     kb.row()
     kb.add(Callback("Снять варн", {"cmd": "unwarn_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
