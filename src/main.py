@@ -447,6 +447,7 @@ class ChatMiddleware(BaseMiddleware[Message]):
                     kb_filter.row()
                     kb_filter.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
                     import random as _random
+                    import json as _json
                     await bot.api.messages.send(
                         peer_id=self.event.peer_id,
                         message=(
@@ -454,6 +455,11 @@ class ChatMiddleware(BaseMiddleware[Message]):
                             f"за написание запрещённого слова."
                         ),
                         keyboard=kb_filter.get_json(),
+                        forward=_json.dumps({
+                            "peer_id": self.event.peer_id,
+                            "conversation_message_ids": [self.event.conversation_message_id],
+                            "is_reply": True
+                        }),
                         random_id=_random.randint(0, 2**31)
                     )
                     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
