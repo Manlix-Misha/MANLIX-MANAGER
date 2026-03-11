@@ -432,36 +432,39 @@ class ChatMiddleware(BaseMiddleware[Message]):
                 bad_words  = chat.get("filter_words", [])
                 hit = next((w for w in bad_words if w in text_lower), None)
                 if hit:
-                    try:
-                        await bot.api.messages.delete(
-                            peer_id=self.event.peer_id,
-                            conversation_message_ids=[self.event.conversation_message_id],
-                            delete_for_all=True
-                        )
-                    except:
-                        pass
+                    import random as _random
+                    # Сохраняем cmid ДО удаления сообщения
+                    cmid_filter = self.event.conversation_message_id
+                    peer_filter  = self.event.peer_id
+                    # Выдаём мут
                     until = time.time() + 30 * 60
                     chat["mutes"][uid] = until
-                    dt = datetime.datetime.fromtimestamp(until, TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
+                    # СНАЧАЛА отправляем reply (пока сообщение ещё существует)
                     kb_filter = Keyboard(inline=True)
                     kb_filter.row()
                     kb_filter.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
-                    import random as _random
-                    import json as _json
-                    await bot.api.messages.send(
-                        peer_id=self.event.peer_id,
-                        message=(
-                            f"[id{from_id}|Пользователь] получил мут на 30 минут "
-                            f"за написание запрещённого слова."
-                        ),
-                        keyboard=kb_filter.get_json(),
-                        forward=_json.dumps({
-                            "peer_id": self.event.peer_id,
-                            "conversation_message_ids": [self.event.conversation_message_id],
-                            "is_reply": True
-                        }),
-                        random_id=_random.randint(0, 2**31)
-                    )
+                    try:
+                        await bot.api.messages.send(
+                            peer_id=peer_filter,
+                            message=(
+                                f"[id{from_id}|Пользователь] получил мут на 30 минут "
+                                f"за написание запрещённого слова."
+                            ),
+                            keyboard=kb_filter.get_json(),
+                            reply_to=cmid_filter,
+                            random_id=_random.randint(0, 2**31)
+                        )
+                    except Exception as e:
+                        print("filter send error:", e)
+                    # ПОТОМ удаляем сообщение с запрещённым словом
+                    try:
+                        await bot.api.messages.delete(
+                            peer_id=peer_filter,
+                            conversation_message_ids=[cmid_filter],
+                            delete_for_all=True
+                        )
+                    except Exception as e:
+                        print("filter delete error:", e)
                     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
                     self.stop()
                     return
