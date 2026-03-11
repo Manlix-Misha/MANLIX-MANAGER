@@ -1257,7 +1257,8 @@ async def getban_cmd(m: Message, args=None):
             b     = bans[uid]
             title = DATABASE["chats"].get(pid_b, {}).get("title", f"Беседа {pid_b}")
             dt    = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
-            local_bans.append(f"{title} | [id{b['admin']}|Модератор MANLIX] | {dt}")
+            reason_b = b.get("reason", "-")
+            local_bans.append(f"{title} | [id{b['admin']}|Модератор MANLIX] | {reason_b} | {dt}")
 
     if local_bans:
         ans += f"\nКоличество Бесед, в которых заблокирован пользователь: {len(local_bans)}\n"
@@ -1354,7 +1355,7 @@ async def typetex_cmd(m: Message, args=None):
     if not await check_access(m, "Специальный Руководитель"): return
     pid   = str(m.peer_id)
     ensure_chat(pid)
-    valid = ["tex", "bug"]
+    valid = ["tex", "bug", "add"]
     if args:
         new_type = args.strip().lower()
         if new_type in valid:
@@ -1368,7 +1369,8 @@ async def typetex_cmd(m: Message, args=None):
     await m.answer(
         f"Беседа имеет тип: {current}\n\n"
         "tex - Тех. Раздел\n"
-        "bug - Баг-трекер"
+        "bug - Баг-трекер\n"
+        "add - Беседа предложений"
     )
 
 # ────────────────────────────────────────────────
@@ -1602,7 +1604,7 @@ async def thelp_cmd(m: Message):
     if t_w >= 2 or w_global >= 8:
         msg += (
             "\n\nКоманды старших тестировщиков:\n"
-            "Отсутствуют."
+            "/add -- отправить предложение по улучшению."
         )
 
     # Главный тестировщик и выше
@@ -1758,6 +1760,49 @@ async def tstaff_cmd(m: Message):
         res += "– Отсутствуют."
 
     await m.answer(res.strip())
+
+@bot.on.message(text=["/add", "/add <args>"])
+async def add_cmd(m: Message, args=None):
+    # Доступно Старшему тестировщику и выше
+    t_role, _ = get_tester_info(m.from_id)
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    has_access = (
+        TESTER_RANK_WEIGHT.get(t_role, 0) >= TESTER_RANK_WEIGHT.get("Старший Тестировщик", 0)
+        or RANK_WEIGHT.get(my_global, 0) >= 8
+    )
+    if not has_access:
+        return await m.answer("Недостаточно прав!")
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    if chat_type != "test" and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в беседе тестировщиков.")
+    if not args or not args.strip():
+        return await m.answer("Укажите предложение. Пример: /add [предложение]")
+    suggestion = args.strip()
+    now = datetime.datetime.now(TZ_MSK)
+    # Отправляем в беседу типа "add"
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    form = (
+        "…::: ПРЕДЛОЖЕНИЕ :::…\n\n"
+        f"| Тестировщик: [id{m.from_id}|{a_display}]\n"
+        f"| Время: {now.strftime('%H:%M:%S')}\n"
+        f"| Дата: {now.strftime('%d/%m/%Y')}\n\n"
+        f"| Предложение: {suggestion}"
+    )
+    sent = False
+    for pid_c, chat in list(DATABASE.get("chats", {}).items()):
+        if chat.get("type") == "add":
+            try:
+                await bot.api.messages.send(
+                    peer_id=int(pid_c),
+                    message=form,
+                    random_id=__import__("random").randint(0, 2**31)
+                )
+                sent = True
+            except Exception as e:
+                print(f"/add send error to {pid_c}:", e)
+    await m.answer(f"[id{m.from_id}|{a_display}] отправил(-а) предложение по улучшению Бота.")
 
 @bot.on.message(text=["/addtester", "/addtester <args>"])
 async def addtester_cmd(m: Message, args=None):
