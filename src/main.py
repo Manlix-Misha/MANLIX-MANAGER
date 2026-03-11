@@ -1785,7 +1785,7 @@ async def add_cmd(m: Message, args=None):
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     form = (
         "…::: ПРЕДЛОЖЕНИЕ :::…\n\n"
-        f"| Тестировщик: [id{m.from_id}|{a_display}]\n"
+        f"| Тестировщик: [id{m.from_id}|MANLIX]\n"
         f"| Время: {now.strftime('%H:%M:%S')}\n"
         f"| Дата: {now.strftime('%d/%m/%Y')}\n\n"
         f"| Предложение: {suggestion}"
