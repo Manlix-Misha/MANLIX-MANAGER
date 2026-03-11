@@ -181,6 +181,12 @@ def ensure_chat(pid: str):
             chat[key] = {}
     if "invite_only" not in chat:
         chat["invite_only"] = False
+    if "quit_mode" not in chat:
+        chat["quit_mode"] = False
+    if "filter_enabled" not in chat:
+        chat["filter_enabled"] = False
+    if "filter_words" not in chat:
+        chat["filter_words"] = []
 
 def is_vk_ref(token: str) -> bool:
     """Проверяет, является ли токен ссылкой/упоминанием/ID пользователя ВК."""
@@ -401,6 +407,58 @@ class ChatMiddleware(BaseMiddleware[Message]):
             except:
                 pass
             self.stop()
+            return
+
+        # ── Режим тишины (/quit) ──────────────────────
+        if chat.get("quit_mode", False):
+            rank, _ = get_user_info(self.event.peer_id, from_id)
+            if RANK_WEIGHT.get(rank, 0) < 1:
+                try:
+                    await bot.api.messages.delete(
+                        peer_id=self.event.peer_id,
+                        conversation_message_ids=[self.event.conversation_message_id],
+                        delete_for_all=True
+                    )
+                except:
+                    pass
+                self.stop()
+                return
+
+        # ── Фильтр запрещённых слов ───────────────────
+        if chat.get("filter_enabled", False):
+            rank, _ = get_user_info(self.event.peer_id, from_id)
+            if RANK_WEIGHT.get(rank, 0) < 1:
+                text_lower = (self.event.text or "").lower()
+                bad_words  = chat.get("filter_words", [])
+                hit = next((w for w in bad_words if w in text_lower), None)
+                if hit:
+                    try:
+                        await bot.api.messages.delete(
+                            peer_id=self.event.peer_id,
+                            conversation_message_ids=[self.event.conversation_message_id],
+                            delete_for_all=True
+                        )
+                    except:
+                        pass
+                    until = time.time() + 30 * 60
+                    chat["mutes"][uid] = until
+                    dt = datetime.datetime.fromtimestamp(until, TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
+                    kb_filter = Keyboard(inline=True)
+                    kb_filter.row()
+                    kb_filter.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
+                    import random as _random
+                    await bot.api.messages.send(
+                        peer_id=self.event.peer_id,
+                        message=(
+                            f"[id{from_id}|Пользователь] получил мут на 30 минут "
+                            f"за написание запрещённого слова."
+                        ),
+                        keyboard=kb_filter.get_json(),
+                        random_id=_random.randint(0, 2**31)
+                    )
+                    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+                    self.stop()
+                    return
 
 bot.labeler.message_view.register_middleware(ChatMiddleware)
 
@@ -442,7 +500,8 @@ async def help_cmd(m: Message):
     if w >= 3:
         res += (
             "\n\nКоманды администраторов:\n"
-            "/addsenmoder -- выдать права старшего модератора."
+            "/addsenmoder -- выдать права старшего модератора.\n"
+            "/quit -- включить режим тишины."
         )
     if w >= 4:
         res += (
@@ -463,7 +522,8 @@ async def help_cmd(m: Message):
         res += (
             "\n\nКоманды владельца:\n"
             "/addsa -- выдать права специального администратора.\n"
-            "/invite -- управление добавлением участников."
+            "/invite -- управление добавлением участников.\n"
+            "/filter -- включить фильтр запрещённых слов."
         )
     await m.answer(res)
     if w >= 8:
@@ -478,7 +538,8 @@ async def help_cmd(m: Message):
             "Основной Зам. Спец. Руководителя:\n"
             "/addzsr -- выдать права заместителя спец. руководителя.\n"
             "/thelp -- список команд для тестировщиков.\n"
-            "/msg -- отправить рассылку.\n\n"
+            "/msg -- отправить рассылку.\n"
+            "/filter add/del -- добавить/удалить запрещённое слово из фильтра.\n\n"
             "Спец. Руководителя:\n"
             "/addozsr -- выдать права основного заместителя спец. руководителя.\n"
             "/start -- активировать Беседу.\n"
@@ -2025,6 +2086,80 @@ async def invite_cmd(m: Message):
         await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) функцию добавления только модерацией!")
     else:
         await m.answer(f"[id{m.from_id}|{a_display}] отключил(-а) функцию добавления только модерацией!")
+
+# ────────────────────────────────────────────────
+# /quit — режим тишины
+# ────────────────────────────────────────────────
+@bot.on.message(text="/quit")
+async def quit_cmd(m: Message):
+    if not await check_access(m, "Администратор"): return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    current = DATABASE["chats"][pid].get("quit_mode", False)
+    DATABASE["chats"][pid]["quit_mode"] = not current
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    if not current:
+        await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) режим тишины!")
+    else:
+        await m.answer(f"[id{m.from_id}|{a_display}] выключил(-а) режим тишины!")
+
+# ────────────────────────────────────────────────
+# /filter — фильтр запрещённых слов
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/filter", "/filter <args>"])
+async def filter_cmd(m: Message, args=None):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    my_rank, _ = get_user_info(m.peer_id, m.from_id)
+    w = RANK_WEIGHT.get(my_rank, 0)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+
+    if not args or not args.strip():
+        # Переключатель — только Владелец
+        if w < 7:
+            return await m.answer("Недостаточно прав!")
+        current = DATABASE["chats"][pid].get("filter_enabled", False)
+        DATABASE["chats"][pid]["filter_enabled"] = not current
+        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        if not current:
+            await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) фильтр запрещённых слов!")
+        else:
+            await m.answer(f"[id{m.from_id}|{a_display}] выключил(-а) фильтр запрещённых слов!")
+        return
+
+    parts = args.strip().split(None, 1)
+    subcmd = parts[0].lower()
+    word   = parts[1].strip().lower() if len(parts) > 1 else ""
+
+    if subcmd == "add":
+        # Только Основной ЗСР и выше
+        if w < 9:
+            return await m.answer("Недостаточно прав!")
+        if not word:
+            return await m.answer("Укажите слово. Пример: /filter add [слово]")
+        words = DATABASE["chats"][pid].get("filter_words", [])
+        if word not in words:
+            words.append(word)
+            DATABASE["chats"][pid]["filter_words"] = words
+            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        await m.answer(f"[id{m.from_id}|{a_display}] добавил(-а) новое запрещённое слово в фильтр.")
+
+    elif subcmd == "del":
+        # Только Основной ЗСР и выше
+        if w < 9:
+            return await m.answer("Недостаточно прав!")
+        if not word:
+            return await m.answer("Укажите слово. Пример: /filter del [слово]")
+        words = DATABASE["chats"][pid].get("filter_words", [])
+        if word in words:
+            words.remove(word)
+            DATABASE["chats"][pid]["filter_words"] = words
+            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        await m.answer(f"[id{m.from_id}|{a_display}] удалил(-а) запрещённое слово из фильтра.")
+
+    else:
+        await m.answer("Неизвестная подкоманда. Используй: /filter, /filter add [слово], /filter del [слово]")
 
 # ────────────────────────────────────────────────
 # Системные события
