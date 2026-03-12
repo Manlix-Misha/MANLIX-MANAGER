@@ -310,7 +310,11 @@ def get_user_info(peer_id, user_id):
     staff = DATABASE.get("chats", {}).get(str(peer_id), {}).get("staff", {})
     entry = staff.get(uid)
     if entry:
-        local_role = entry[0]
+        # Собираем все локальные роли и берём наивысшую
+        all_local = [entry[0]]
+        if len(entry) > 2 and isinstance(entry[2], list):
+            all_local += entry[2]
+        local_role = max(all_local, key=lambda r: RANK_WEIGHT.get(r, 0))
         nick       = entry[1]
     else:
         local_role = "Пользователь"
@@ -345,11 +349,37 @@ async def check_access(m: Message, min_rank: str):
         return False
     return True
 
+def get_all_local_roles(pid: str, uid: str) -> list:
+    """Возвращает список всех локальных ролей пользователя в беседе."""
+    entry = DATABASE.get("chats", {}).get(pid, {}).get("staff", {}).get(uid)
+    if not entry:
+        return []
+    roles = [entry[0]]
+    if len(entry) > 2 and isinstance(entry[2], list):
+        roles += entry[2]
+    return roles
+
+def highest_role(roles: list) -> str:
+    """Возвращает наивысшую роль из списка."""
+    if not roles:
+        return "Пользователь"
+    return max(roles, key=lambda r: RANK_WEIGHT.get(r, 0))
+
 async def set_role_in_chat(pid: str, uid: str, role_name: str):
+    """Добавляет роль пользователю (накапливает, не перезаписывает)."""
     ensure_chat(pid)
-    current = DATABASE["chats"][pid]["staff"].get(uid, [role_name, None])
-    nick    = current[1]
-    DATABASE["chats"][pid]["staff"][uid] = [role_name, nick]
+    entry = DATABASE["chats"][pid]["staff"].get(uid)
+    if entry:
+        nick = entry[1]
+        existing = get_all_local_roles(pid, uid)
+    else:
+        nick = None
+        existing = []
+    if role_name not in existing:
+        existing.append(role_name)
+    top  = highest_role(existing)
+    rest = [r for r in existing if r != top]
+    DATABASE["chats"][pid]["staff"][uid] = [top, nick, rest]
 
 # ────────────────────────────────────────────────
 # Middleware
@@ -463,7 +493,7 @@ class ChatMiddleware(BaseMiddleware[Message]):
                         await bot.api.messages.send(
                             peer_id=peer_filter,
                             message=(
-                                f"[id{from_id}|Пользователь] получил мут на 30 минут "
+                                f"[id{from_id}|Пользователь] получил(-а) мут на 30 минут "
                                 f"за написание запрещённого слова."
                             ),
                             keyboard=kb_filter.get_json(),
@@ -522,7 +552,7 @@ async def help_cmd(m: Message):
         res += (
             "\n\nКоманды старших модераторов:\n"
             "/addmoder -- выдать права модератора.\n"
-            "/removerole -- снять уровень прав.\n"
+            "/removerole -- снять уровень прав (конкретный или все).\n"
             "/ban -- блокировка пользователя в Беседе.\n"
             "/unban -- снятие блокировки пользователю в беседе."
         )
@@ -618,9 +648,17 @@ async def stats_cmd(m: Message, args=None):
         if st["last"] else "Нет данных"
     )
     nick_display = nick if nick else "Не установлен"
+    # Показываем все роли пользователя в беседе (высшая первая)
+    all_local = get_all_local_roles(pid, uid)
+    if all_local:
+        top_r  = highest_role(all_local)
+        others = [r for r in all_local if r != top_r]
+        roles_str = top_r + (" | " + " | ".join(others) if others else "")
+    else:
+        roles_str = role  # fallback — глобальная роль
     msg = (
         f"Информация о [id{t}|пользователе]\n"
-        f"Роль: {role}\n"
+        f"Роль: {roles_str}\n"
         f"Блокировок: {bans_cnt}\n"
         f"Общая блокировка в чатах: {gban}\n"
         f"Общая блокировка в беседах игроков: {gbanpl}\n"
@@ -1047,11 +1085,15 @@ async def role_grant(m: Message, args, min_rank, role_name, role_label):
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
-    if t == m.from_id:
+    my_rank, _ = get_user_info(m.peer_id, m.from_id)
+    my_w       = RANK_WEIGHT.get(my_rank, 0)
+    is_leader  = my_w >= 8  # ЗСР и выше могут выдавать себе роли
+    # Самовыдача разрешена только руководству (ЗСР+)
+    if t == m.from_id and not is_leader:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
-    my_rank, _  = get_user_info(m.peer_id, m.from_id)
     tgt_rank, _ = get_user_info(m.peer_id, t)
-    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+    # Обычная проверка ранга (не для самовыдачи)
+    if t != m.from_id and RANK_WEIGHT.get(tgt_rank, 0) >= my_w:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
     pid, uid  = str(m.peer_id), str(t)
     await set_role_in_chat(pid, uid, role_name)
@@ -1123,19 +1165,74 @@ async def addozsr(m: Message, args=None):
 # ────────────────────────────────────────────────
 # /removerole
 # ────────────────────────────────────────────────
+# Карта коротких псевдонимов для ролей (для удобства в /removerole)
+ROLE_ALIASES = {
+    "модератор":                        "Модератор",
+    "мод":                              "Модератор",
+    "старший модератор":                "Старший Модератор",
+    "ст.мод":                           "Старший Модератор",
+    "стмод":                            "Старший Модератор",
+    "администратор":                    "Администратор",
+    "адм":                              "Администратор",
+    "старший администратор":            "Старший Администратор",
+    "ст.адм":                           "Старший Администратор",
+    "стадм":                            "Старший Администратор",
+    "зам. спец. администратора":        "Зам. Спец. Администратора",
+    "зса":                              "Зам. Спец. Администратора",
+    "спец. администратор":              "Спец. Администратор",
+    "са":                               "Спец. Администратор",
+    "владелец":                         "Владелец",
+}
+
 @bot.on.message(text=["/removerole", "/removerole <args>"])
 async def removerole(m: Message, args=None):
     if not await check_access(m, "Старший Модератор"): return
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя.")
-    pid, uid  = str(m.peer_id), str(t)
+    pid, uid = str(m.peer_id), str(t)
     ensure_chat(pid)
-    if uid in DATABASE["chats"][pid].get("staff", {}):
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+
+    # Определяем конкретную роль для удаления (если указана после ссылки/id)
+    role_to_remove = None
+    if args:
+        # Убираем из args токены-ссылки/id чтобы получить текст роли
+        tokens = args.split()
+        rest_tokens = [tk for tk in tokens if not is_vk_ref(tk)]
+        role_text = " ".join(rest_tokens).strip().lower()
+        if role_text:
+            role_to_remove = ROLE_ALIASES.get(role_text)
+            if not role_to_remove:
+                # Попробуем прямое совпадение без регистра
+                for rname in RANK_WEIGHT.keys():
+                    if rname.lower() == role_text:
+                        role_to_remove = rname
+                        break
+
+    if uid not in DATABASE["chats"][pid].get("staff", {}):
+        return await m.answer(f"У [id{t}|пользователя] нет ролей в этой беседе.")
+
+    if role_to_remove:
+        # Удаляем только конкретную роль
+        all_roles = get_all_local_roles(pid, uid)
+        if role_to_remove not in all_roles:
+            return await m.answer(f"У [id{t}|пользователя] нет роли «{role_to_remove}».")
+        all_roles.remove(role_to_remove)
+        if not all_roles:
+            del DATABASE["chats"][pid]["staff"][uid]
+        else:
+            nick = DATABASE["chats"][pid]["staff"][uid][1]
+            top  = highest_role(all_roles)
+            rest = [r for r in all_roles if r != top]
+            DATABASE["chats"][pid]["staff"][uid] = [top, nick, rest]
+        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) роль «{role_to_remove}» [id{t}|пользователю]")
+    else:
+        # Без указания роли — удаляем все роли
         del DATABASE["chats"][pid]["staff"][uid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|пользователю]")
+        await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) все уровни прав [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # /gunrole — снять глобальную роль (зам, основной зам)
@@ -1194,7 +1291,11 @@ async def staff_view(m: Message):
     for r in order:
         members = []
         for u, entry in staff.items():
-            if entry[0] == r:
+            # Собираем все роли пользователя (primary + extra)
+            all_u_roles = [entry[0]]
+            if len(entry) > 2 and isinstance(entry[2], list):
+                all_u_roles += entry[2]
+            if r in all_u_roles:
                 nick = entry[1]
                 if nick:
                     display = nick
@@ -1206,7 +1307,13 @@ async def staff_view(m: Message):
                         display = f"id{u}"
                 members.append(f"– [id{u}|{display}]")
         if r == "Владелец":
-            owner_ids = [u for u, entry in staff.items() if entry[0] == "Владелец"]
+            owner_ids = []
+            for u, entry in staff.items():
+                all_roles = [entry[0]]
+                if len(entry) > 2 and isinstance(entry[2], list):
+                    all_roles += entry[2]
+                if "Владелец" in all_roles:
+                    owner_ids.append(u)
             if owner_ids:
                 block = f"Владелец -- [id{owner_ids[0]}|MANLIX MANAGER]"
                 for oid in owner_ids[1:]:
@@ -1255,7 +1362,10 @@ async def setnick(m: Message, args=None):
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     # Ник можно выдать любому включая владельца.
     # В /staff владелец всегда отображается как MANLIX MANAGER (независимо от ника)
-    DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick]
+    # Сохраняем все существующие роли, меняем только ник
+    existing_entry = DATABASE["chats"][pid]["staff"].get(uid)
+    extra_roles = existing_entry[2] if existing_entry and len(existing_entry) > 2 else []
+    DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick, extra_roles]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
 
@@ -1273,7 +1383,9 @@ async def rnick(m: Message, args=None):
     pid, uid = str(m.peer_id), str(t)
     ensure_chat(pid)
     if uid in DATABASE["chats"][pid].get("staff", {}):
-        DATABASE["chats"][pid]["staff"][uid][1] = None
+        entry_r = DATABASE["chats"][pid]["staff"][uid]
+        extra_r = entry_r[2] if len(entry_r) > 2 else []
+        DATABASE["chats"][pid]["staff"][uid] = [entry_r[0], None, extra_r]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|пользователю]")
@@ -2152,10 +2264,8 @@ async def filter_cmd(m: Message, args=None):
         current = DATABASE["chats"][pid].get("filter_enabled", False)
         DATABASE["chats"][pid]["filter_enabled"] = not current
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        words = DATABASE["chats"][pid].get("filter_words", [])
-        words_info = f"\n| Слов в фильтре: {len(words)}" if words else "\n| Слов в фильтре: 0 (добавьте через /filter add [слово])"
         if not current:
-            await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) фильтр запрещённых слов!{words_info}")
+            await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) фильтр запрещённых слов!")
         else:
             await m.answer(f"[id{m.from_id}|{a_display}] выключил(-а) фильтр запрещённых слов!")
         return
