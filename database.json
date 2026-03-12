@@ -233,8 +233,8 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 484,
-                    "last": 1773327546.770662
+                    "count": 486,
+                    "last": 1773327558.995013
                 },
                 "778382713": {
                     "count": 361,
@@ -250,7 +250,7 @@
                 }
             },
             "type": "pl",
-            "invite_only": false,
+            "invite_only": true,
             "quit_mode": false,
             "filter_enabled": false,
             "filter_words": []
