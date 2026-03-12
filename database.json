@@ -357,8 +357,8 @@
             },
             "stats": {
                 "870757778": {
-                    "count": 511,
-                    "last": 1773328899.497426
+                    "count": 512,
+                    "last": 1773342620.515957
                 },
                 "778382713": {
                     "count": 528,
@@ -602,11 +602,15 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 2,
-                    "last": 1773342608.44276
+                    "count": 3,
+                    "last": 1773342636.10181
+                },
+                "844959569": {
+                    "count": 1,
+                    "last": 1773342618.807798
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
