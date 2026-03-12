@@ -285,12 +285,12 @@
                     "last": 1773305303.684867
                 },
                 "770181550": {
-                    "count": 160,
-                    "last": 1773312096.606206
+                    "count": 162,
+                    "last": 1773312116.161096
                 }
             },
             "type": "pl",
-            "invite_only": false,
+            "invite_only": true,
             "quit_mode": false,
             "filter_enabled": false,
             "filter_words": []
