@@ -611,17 +611,17 @@
                     "last": 1773342826.168964
                 },
                 "844959569": {
-                    "count": 14,
-                    "last": 1773342984.195368
+                    "count": 16,
+                    "last": 1773343114.677765
                 },
                 "729733802": {
-                    "count": 3,
-                    "last": 1773342830.152166
+                    "count": 5,
+                    "last": 1773343095.198605
                 }
             },
             "type": "pl",
             "invite_only": false,
-            "quit_mode": true,
+            "quit_mode": false,
             "filter_enabled": false,
             "filter_words": []
         }
