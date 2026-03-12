@@ -500,8 +500,8 @@
                     "last": 1773239956.122764
                 },
                 "798274800": {
-                    "count": 94,
-                    "last": 1773297143.127646
+                    "count": 97,
+                    "last": 1773314298.69997
                 }
             },
             "type": "pl",
@@ -557,6 +557,26 @@
             },
             "type": "add",
             "invite_only": false
+        },
+        "2000000033": {
+            "title": ".",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "478437927": {
+                    "count": 1,
+                    "last": 1773315348.786155
+                },
+                "870757778": {
+                    "count": 1,
+                    "last": 1773318776.837402
+                }
+            },
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
         }
     },
     "gstaff": {
