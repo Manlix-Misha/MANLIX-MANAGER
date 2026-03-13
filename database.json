@@ -252,8 +252,8 @@
                     "last": 1773415850.952928
                 },
                 "778382713": {
-                    "count": 398,
-                    "last": 1773415845.00567
+                    "count": 399,
+                    "last": 1773415979.091724
                 },
                 "675783407": {
                     "count": 261,
@@ -370,8 +370,8 @@
             },
             "stats": {
                 "870757778": {
-                    "count": 541,
-                    "last": 1773414980.232666
+                    "count": 542,
+                    "last": 1773416542.292847
                 },
                 "778382713": {
                     "count": 556,
@@ -399,7 +399,7 @@
                 }
             },
             "type": "test",
-            "invite_only": false,
+            "invite_only": true,
             "quit_mode": false,
             "filter_enabled": true,
             "filter_words": [
