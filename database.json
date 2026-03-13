@@ -370,8 +370,8 @@
             },
             "stats": {
                 "870757778": {
-                    "count": 542,
-                    "last": 1773416542.292847
+                    "count": 543,
+                    "last": 1773416647.587947
                 },
                 "778382713": {
                     "count": 556,
@@ -401,7 +401,7 @@
             "type": "test",
             "invite_only": true,
             "quit_mode": false,
-            "filter_enabled": true,
+            "filter_enabled": false,
             "filter_words": [
                 "пидорас"
             ]
