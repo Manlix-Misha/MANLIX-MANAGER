@@ -1133,7 +1133,7 @@ async def addozsr(m: Message, args=None):
     STAFF["gstaff"]["main_zam"] = t
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя специального руководителя [id{t}|пользователю]")
+    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя спец. руководителя [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # /removerole
@@ -1756,31 +1756,31 @@ async def thelp_cmd(m: Message):
 
     msg = (
         "Команды тестировщиков:\n"
-        "/tstats -- статистика тестировщика.\n"
-        "/tstaff -- команда тестировщиков.\n"
-        "/bug -- отчет багов."
+        "/tstats -- Информация о тестировщике.\n"
+        "/tstaff -- Команда тестирования.\n"
+        "/bug -- Отправить отчет о Баге."
     )
 
     if t_w >= 2 or w_global >= 8:
         msg += (
-            "\n\nКоманды старших тестировщиков:\n"
-            "/add -- отправить предложение по улучшению."
+            "\n\nСтарший тестировщик:\n"
+            "/add -- Отправить предложение."
         )
 
     if t_w >= 3 or w_global >= 8:
         msg += (
-            "\n\nКоманды главного тестировщика:\n"
-            "/addtester -- выдать права тестировщика.\n"
-            "/addsentester -- выдать права старшего тестировщика.\n"
-            "/removetester -- забрать права тестировщика."
+            "\n\nГлавный тестировщик:\n"
+            "/addtester -- Выдать права тестировщика.\n"
+            "/addsentester -- Выдать права старшего тестировщика.\n"
+            "/removetester -- Забрать права тестировщика."
         )
 
     if w_global >= 8:
         msg += (
-            "\n\nКоманды спец. Руководства:\n"
-            "/addgt -- выдать права главного тестировщика.\n"
-            "/typetex test -- сменить тип беседы, на беседу тестировщиков.\n"
-            "/typetex bug -- сменить тип беседы, на Баг-трекер."
+            "\n\nСпец. Руководство:\n"
+            "/addgt -- Выдать права Главного Тестировщика.\n"
+            "/typetex test -- Изменить технический тип Беседы.\n"
+            "/typetex bug -- Изменить Технический тип Беседы."
         )
 
     await m.answer(msg)
@@ -2252,11 +2252,9 @@ async def filterlist_cmd(m: Message):
     pid = str(m.peer_id)
     ensure_chat(pid)
     words   = DATABASE["chats"][pid].get("filter_words", [])
-    enabled = DATABASE["chats"][pid].get("filter_enabled", False)
-    status  = "включён" if enabled else "выключен"
     if not words:
-        return await m.answer(f"| Фильтр {status}\n| Список запрещённых слов: пуст")
-    msg = f"| Фильтр {status}\n| Список запрещённых слов:\n"
+        return await m.answer("| Список запрещённых слов: пуст")
+    msg = "| Список запрещённых слов:\n"
     for w in words:
         msg += f"-- {w}\n"
     await m.answer(msg.strip())
