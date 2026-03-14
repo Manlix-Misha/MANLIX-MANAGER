@@ -192,49 +192,39 @@ def is_vk_ref(token: str) -> bool:
     """Проверяет, является ли токен ссылкой/упоминанием/ID пользователя ВК."""
     if re.search(r"\[id\d+\|", token):
         return True
-    # vk.com и vk.ru — оба домена ВКонтакте
     if re.search(r"https?://vk\.(com|ru)/", token):
         return True
     if re.match(r"^id\d+$", token):
         return True
-    # Просто число считается ID только если достаточно большое (> 1000)
-    # чтобы не путать с числами в причине ("пункт 1", "нарушение 3")
     if re.match(r"^\d+$", token) and int(token) > 1000:
         return True
     return False
 
 async def get_target_id(m: Message, args: str = None):
     """Получить ID цели из reply, ссылки или первого токена args."""
-    # Приоритет 1: reply на сообщение
     if getattr(m, "reply_message", None):
         return m.reply_message.from_id
     if not args:
         return None
 
-    # Приоритет 2: ищем [id123|...] в ЛЮБОМ месте строки args
     match = re.search(r"\[id(\d+)\|", args)
     if match:
         return int(match.group(1))
 
-    # Приоритет 3: ищем vk.com/id123 или vk.ru/id123 в ЛЮБОМ месте строки
     match = re.search(r"vk\.(com|ru)/id(\d+)", args)
     if match:
         return int(match.group(2))
 
-    # Приоритет 4: первый токен
     tokens = args.split()
     first  = tokens[0] if tokens else ""
 
-    # id123
     match = re.match(r"^id(\d+)$", first)
     if match:
         return int(match.group(1))
 
-    # Просто число
     if first.isdigit():
         return int(first)
 
-    # vk.com/screenname или vk.ru/screenname (не id-ссылка)
     match = re.search(r"https?://vk\.(com|ru)/([A-Za-z0-9_\.]+)", args)
     if match:
         sn = match.group(2)
@@ -246,13 +236,11 @@ async def get_target_id(m: Message, args: str = None):
             except:
                 pass
         else:
-            # vk.com/id123 — на случай если первый regex не сработал
             try:
                 return int(sn[2:])
             except:
                 pass
 
-    # screen_name — только если не похож на ссылку
     if first and not first.startswith("http") and "/" not in first:
         try:
             res = await bot.api.utils.resolve_screen_name(screen_name=first)
@@ -270,7 +258,6 @@ def parse_reason(args: str) -> str:
     if not args:
         return "Нарушение"
     tokens = args.split()
-    # Пропускаем все токены которые являются ссылкой или ID
     rest = [t for t in tokens if not is_vk_ref(t)]
     return " ".join(rest) or "Нарушение"
 
@@ -284,7 +271,6 @@ def parse_mute_args(args: str):
     if not args:
         return 60, "Нарушение"
     tokens = args.split()
-    # Пропускаем все токены которые являются ссылкой или ID
     remaining = [t for t in tokens if not is_vk_ref(t)]
     if not remaining:
         return 60, "Нарушение"
@@ -310,7 +296,6 @@ def get_user_info(peer_id, user_id):
     staff = DATABASE.get("chats", {}).get(str(peer_id), {}).get("staff", {})
     entry = staff.get(uid)
     if entry:
-        # Собираем все локальные роли и берём наивысшую
         all_local = [entry[0]]
         if len(entry) > 2 and isinstance(entry[2], list):
             all_local += entry[2]
@@ -327,7 +312,7 @@ async def get_display_name(user_id: int, peer_id=None, use_nick=True):
     Возвращает отображаемое имя пользователя:
     1. Ник из бота (если установлен через /setnick и use_nick=True)
     2. Имя и фамилия из профиля ВК
-    3. Fallback: "id{user_id}" (чтобы хоть что-то было вместо "пользователь")
+    3. Fallback: "id{user_id}"
     """
     if use_nick and peer_id:
         _, nick = get_user_info(peer_id, user_id)
@@ -386,8 +371,6 @@ async def set_role_in_chat(pid: str, uid: str, role_name: str):
 # ────────────────────────────────────────────────
 class ChatMiddleware(BaseMiddleware[Message]):
     async def pre(self):
-        # ФИКС: пропускаем системные события (добавление/исключение пользователей)
-        # Иначе quit_mode/filter удаляли системные сообщения и блокировали actions handler
         if getattr(self.event, "action", None):
             return
         if not getattr(self.event, "from_id", None) or self.event.from_id < 0:
@@ -399,24 +382,21 @@ class ChatMiddleware(BaseMiddleware[Message]):
         # ── Проверка bot_status ──────────────────────
         status = DATABASE.get("bot_status", "on")
         if status != "on":
-            # Спец. Руководитель всегда может пользоваться
             if from_id == 870757778:
-                pass  # пропускаем проверку
+                pass
             else:
                 rank, _ = get_user_info(self.event.peer_id, from_id)
                 w = RANK_WEIGHT.get(rank, 0)
                 allowed = False
-                if w >= 8:          # ЗСР и выше — всегда
+                if w >= 8:
                     allowed = True
                 elif status == "test":
-                    # Тестировщики тоже проходят
                     t_role, _ = get_tester_info(from_id)
                     if t_role:
                         allowed = True
                 if not allowed:
                     self.stop()
                     return
-        # ─────────────────────────────────────────────
 
         ensure_chat(pid)
         chat = DATABASE["chats"][pid]
@@ -460,10 +440,6 @@ class ChatMiddleware(BaseMiddleware[Message]):
 
         # ── Фильтр запрещённых слов ───────────────────
         if chat.get("filter_enabled", False):
-            # Специальный Руководитель → фильтр не срабатывает
-            # Модератор и выше в ЭТОЙ беседе → фильтр не срабатывает
-            # Тестировщик (глобальная роль без роли в беседе) → срабатывает
-            # Обычный пользователь → срабатывает
             gstaff_f    = STAFF.get("gstaff", {})
             is_exempt   = (
                 from_id == 870757778
@@ -479,13 +455,10 @@ class ChatMiddleware(BaseMiddleware[Message]):
                 bad_words  = chat.get("filter_words", [])
                 hit = next((w for w in bad_words if w in text_lower), None)
                 if hit:
-                    # Сохраняем cmid ДО удаления сообщения
                     cmid_filter = self.event.conversation_message_id
                     peer_filter  = self.event.peer_id
-                    # Выдаём мут
                     until = time.time() + 30 * 60
                     chat["mutes"][uid] = until
-                    # СНАЧАЛА отправляем reply (пока сообщение ещё существует)
                     kb_filter = Keyboard(inline=True)
                     kb_filter.row()
                     kb_filter.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
@@ -506,7 +479,6 @@ class ChatMiddleware(BaseMiddleware[Message]):
                         )
                     except Exception as e:
                         print("filter send error:", e)
-                    # ПОТОМ удаляем сообщение с запрещённым словом
                     try:
                         await bot.api.messages.delete(
                             peer_id=peer_filter,
@@ -523,6 +495,8 @@ bot.labeler.message_view.register_middleware(ChatMiddleware)
 
 # ────────────────────────────────────────────────
 # /help
+# ОБНОВЛЕНО по Notion (статус: Готово)
+# Изменения: /invite, /quit, /filter — новые описания
 # ────────────────────────────────────────────────
 @bot.on.message(text="/help")
 async def help_cmd(m: Message):
@@ -530,97 +504,103 @@ async def help_cmd(m: Message):
     w = RANK_WEIGHT.get(rank, 0)
     res = (
         "Команды пользователей:\n"
-        "/info -- официальные ресурсы.\n"
-        "/stats -- статистика пользователя\n"
-        "/getid -- оригинальная ссылка VK."
+        "/info -- Официальные ресурсы.\n"
+        "/stats -- Информация о пользователе.\n"
+        "/getid -- Оригинальная ссылка VK."
     )
     if w >= 1:
         res += (
             "\n\nКоманды для модераторов:\n"
             "/staff -- Руководство Беседы\n"
-            "/kick -- исключить пользователя из Беседы.\n"
-            "/mute -- выдать Блокировку чата.\n"
-            "/unmute -- снять Блокировку чата.\n"
-            "/setnick -- установить имя пользователю.\n"
-            "/rnick -- удалить имя пользователю.\n"
-            "/nlist -- список пользователей с ником.\n"
-            "/getban -- информация о Блокировках.\n"
-            "/warn -- выдать предупреждение.\n"
-            "/unwarn -- снять предупреждение."
+            "/kick -- Исключить пользователя из Беседы.\n"
+            "/mute -- Выдать Блокировку чата.\n"
+            "/unmute -- Снять Блокировку чата.\n"
+            "/setnick -- Установить имя пользователю.\n"
+            "/rnick -- Удалить имя пользователю.\n"
+            "/nlist -- Список пользователей с ником.\n"
+            "/getban -- Информация о Блокировках.\n"
+            "/warn -- Выдать предупреждение.\n"
+            "/unwarn -- Снять предупреждение."
         )
     if w >= 2:
         res += (
             "\n\nКоманды старших модераторов:\n"
-            "/addmoder -- выдать права модератора.\n"
-            "/removerole -- снять уровень прав (конкретный или все).\n"
-            "/ban -- блокировка пользователя в Беседе.\n"
-            "/unban -- снятие блокировки пользователю в беседе."
+            "/addmoder -- Выдать права модератора.\n"
+            "/removerole -- Снять уровень прав.\n"
+            "/ban -- Блокировка пользователя в Беседе.\n"
+            "/unban -- Снятие блокировки пользователю в беседе."
         )
     if w >= 3:
         res += (
             "\n\nКоманды администраторов:\n"
-            "/addsenmoder -- выдать права старшего модератора.\n"
-            "/quit -- включить режим тишины."
+            "/addsenmoder -- Выдать права старшего модератора.\n"
+            "/quit -- включить/выключить режим тишины."
         )
     if w >= 4:
         res += (
             "\n\nКоманды старших администраторов:\n"
-            "/addadmin -- выдать права администратора."
+            "/addadmin -- Выдать права администратора."
         )
     if w >= 5:
         res += (
             "\n\nКоманды заместителей спец. администраторов:\n"
-            "/addsenadmin -- выдать права старшего модератора."
+            "/addsenadmin -- Выдать права старшего модератора."
         )
     if w >= 6:
         res += (
             "\n\nКоманды спец. администраторов:\n"
-            "/addzsa -- выдать права заместителя спец. администратора."
+            "/addzsa -- Выдать права заместителя спец. администратора."
         )
     if w >= 7:
         res += (
             "\n\nКоманды владельца:\n"
-            "/addsa -- выдать права специального администратора.\n"
-            "/invite -- управление добавлением участников.\n"
-            "/filter -- включить фильтр запрещённых слов."
+            "/addsa -- Выдать права специального администратора.\n"
+            "/invite -- Режим добавления только модерацией.\n"
+            "/filter -- включить/выключить фильтрацию запрещённых слов."
         )
     await m.answer(res)
     if w >= 8:
         gres = (
             "Команды руководства Бота:\n\n"
             "Зам. Спец. Руководителя:\n"
-            "/gstaff -- руководство Бота.\n"
-            "/gunrole -- снятие глобальных уровней прав.\n"
-            "/addowner -- выдать права владельца.\n"
+            "/gstaff -- Руководство Бота.\n"
+            "/gunrole -- Снятие глобальных уровней прав.\n"
+            "/addowner -- Выдать права владельца.\n"
             "/gbanpl -- Блокировка пользователя во всех игровых Беседах.\n"
-            "/gunbanpl -- снятие Блокировки во всех игровых Беседах.\n\n"
+            "/gunbanpl -- Снятие Блокировки во всех игровых Беседах.\n\n"
             "Основной Зам. Спец. Руководителя:\n"
-            "/addzsr -- выдать права заместителя спец. руководителя.\n"
-            "/thelp -- список команд для тестировщиков.\n"
-            "/msg -- отправить рассылку.\n"
-            "/filter add/del -- добавить/удалить запрещённое слово из фильтра.\n\n"
+            "/addzsr -- Выдать права заместителя спец. руководителя.\n"
+            "/thelp -- Список команд для тестировщиков.\n"
+            "/msg -- Отправить рассылку.\n\n"
             "Спец. Руководителя:\n"
-            "/addozsr -- выдать права основного заместителя спец. руководителя.\n"
-            "/start -- активировать Беседу.\n"
-            "/type -- изменить тип Беседы.\n"
-            "/typetex -- изменить технический тип Беседы.\n"
-            "/sync -- синхронизация с базой данных.\n"
-            "/botstatus -- изменить статус Бота.\n"
-            "/chatid -- узнать айди Беседы.\n"
-            "/delchat -- удалить чат с Базы данных.\n"
-            "/filterlist -- список запрещённых слов."
+            "/addozsr -- Выдать права основного заместителя спец. руководителя.\n"
+            "/start -- Активировать Беседу.\n"
+            "/type -- Изменить тип Беседы.\n"
+            "/typetex -- Изменить технический тип Беседы.\n"
+            "/sync -- Синхронизация с базой данных.\n"
+            "/botstatus -- Изменить статус Бота.\n"
+            "/chatid -- Узнать айди Беседы.\n"
+            "/delchat -- Удалить чат с Базы данных."
         )
         await m.answer(gres)
 
 # ────────────────────────────────────────────────
 # /info
+# ОБНОВЛЕНО по Notion (статус: Готово)
 # ────────────────────────────────────────────────
 @bot.on.message(text="/info")
 async def info_cmd(m: Message):
-    await m.answer("Официальные ресурсы: [вставьте ссылки или информацию]")
+    await m.answer(
+        "Официальные ресурсы:\n\n"
+        "| Техническая поддержка \n"
+        "| MANLIX Беседы\n"
+        "| Активация Бота\n\n"
+        "(Команда на доработке)"
+    )
 
 # ────────────────────────────────────────────────
 # /getid
+# ОБНОВЛЕНО по Notion (статус: Готово)
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/getid", "/getid <args>"])
 async def getid_cmd(m: Message, args=None):
@@ -629,6 +609,7 @@ async def getid_cmd(m: Message, args=None):
 
 # ────────────────────────────────────────────────
 # /stats
+# ОБНОВЛЕНО по Notion (статус: Готово)
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/stats", "/stats <args>"])
 async def stats_cmd(m: Message, args=None):
@@ -648,14 +629,13 @@ async def stats_cmd(m: Message, args=None):
         if st["last"] else "Нет данных"
     )
     nick_display = nick if nick else "Не установлен"
-    # Показываем все роли пользователя в беседе (высшая первая)
     all_local = get_all_local_roles(pid, uid)
     if all_local:
         top_r  = highest_role(all_local)
         others = [r for r in all_local if r != top_r]
         roles_str = top_r + (" | " + " | ".join(others) if others else "")
     else:
-        roles_str = role  # fallback — глобальная роль
+        roles_str = role
     msg = (
         f"Информация о [id{t}|пользователе]\n"
         f"Роль: {roles_str}\n"
@@ -671,7 +651,7 @@ async def stats_cmd(m: Message, args=None):
     await m.answer(msg)
 
 # ────────────────────────────────────────────────
-# /mute — ИСПРАВЛЕНО: parse_mute_args убирает ссылку из причины
+# /mute
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/mute", "/mute <args>"])
 async def mute_cmd(m: Message, args=None):
@@ -723,22 +703,15 @@ async def unmute_cmd(m: Message, args=None):
 
 # ────────────────────────────────────────────────
 # Единый обработчик кнопок (мут + дуэль)
-# ВАЖНО: в vkbottle только ОДИН raw_event одного типа
 # ────────────────────────────────────────────────
-# Пустая inline-клавиатура как JSON-строка для messages.edit
 EMPTY_KB_JSON = '{"inline":true,"buttons":[]}'
 
 @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, MessageEvent)
 async def all_buttons(event: MessageEvent):
-    # Правильный паттерн по официальной документации vkbottle:
-    # MessageEvent имеет атрибуты напрямую: peer_id, user_id, event_id,
-    # conversation_message_id, payload
-    # и методы: show_snackbar(), send_message_event_answer()
     peer_id  = event.peer_id
     actor_id = event.user_id
     cmid     = event.conversation_message_id
 
-    # Нормализуем payload -> dict
     raw_payload = event.payload
     if raw_payload is None:
         return
@@ -758,7 +731,6 @@ async def all_buttons(event: MessageEvent):
 
     pid = str(peer_id)
 
-    # Используем встроенный метод show_snackbar из MessageEvent
     async def snackbar(text: str):
         try:
             await event.show_snackbar(text)
@@ -911,7 +883,6 @@ async def all_buttons(event: MessageEvent):
             await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
             del DATABASE["duels"][duel_id]
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            # Получаем имена из ВК
             try:
                 w_info = await bot.api.users.get(user_ids=[int(winner)])
                 w_name = f"{w_info[0].first_name} {w_info[0].last_name}"
@@ -935,6 +906,7 @@ async def all_buttons(event: MessageEvent):
 
 # ────────────────────────────────────────────────
 # /kick
+# ОБНОВЛЕНО по Notion (статус: Готово)
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/kick", "/kick <args>"])
 async def kick_cmd(m: Message, args=None):
@@ -944,7 +916,6 @@ async def kick_cmd(m: Message, args=None):
         return await m.answer("Укажите пользователя!")
     if t == m.from_id:
         return await m.answer("Невозможно исключить данного пользователя!")
-    # Проверка на ранг цели
     my_rank, _  = get_user_info(m.peer_id, m.from_id)
     tgt_rank, _ = get_user_info(m.peer_id, t)
     if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
@@ -1033,7 +1004,6 @@ async def warn_cmd(m: Message, args=None):
     current = min(PUNISHMENTS["warns"][pid].get(uid, 0) + 1, 3)
     PUNISHMENTS["warns"][pid][uid] = current
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    # При 3/3 — исключить из беседы
     if current >= 3:
         del PUNISHMENTS["warns"][pid][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
@@ -1087,12 +1057,10 @@ async def role_grant(m: Message, args, min_rank, role_name, role_label):
         return await m.answer("Укажите пользователя.")
     my_rank, _ = get_user_info(m.peer_id, m.from_id)
     my_w       = RANK_WEIGHT.get(my_rank, 0)
-    is_leader  = my_w >= 8  # ЗСР и выше могут выдавать себе роли
-    # Самовыдача разрешена только руководству (ЗСР+)
+    is_leader  = my_w >= 8
     if t == m.from_id and not is_leader:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
     tgt_rank, _ = get_user_info(m.peer_id, t)
-    # Обычная проверка ранга (не для самовыдачи)
     if t != m.from_id and RANK_WEIGHT.get(tgt_rank, 0) >= my_w:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
     pid, uid  = str(m.peer_id), str(t)
@@ -1165,7 +1133,6 @@ async def addozsr(m: Message, args=None):
 # ────────────────────────────────────────────────
 # /removerole
 # ────────────────────────────────────────────────
-# Карта коротких псевдонимов для ролей (для удобства в /removerole)
 ROLE_ALIASES = {
     "модератор":                        "Модератор",
     "мод":                              "Модератор",
@@ -1194,17 +1161,14 @@ async def removerole(m: Message, args=None):
     ensure_chat(pid)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
 
-    # Определяем конкретную роль для удаления (если указана после ссылки/id)
     role_to_remove = None
     if args:
-        # Убираем из args токены-ссылки/id чтобы получить текст роли
         tokens = args.split()
         rest_tokens = [tk for tk in tokens if not is_vk_ref(tk)]
         role_text = " ".join(rest_tokens).strip().lower()
         if role_text:
             role_to_remove = ROLE_ALIASES.get(role_text)
             if not role_to_remove:
-                # Попробуем прямое совпадение без регистра
                 for rname in RANK_WEIGHT.keys():
                     if rname.lower() == role_text:
                         role_to_remove = rname
@@ -1214,7 +1178,6 @@ async def removerole(m: Message, args=None):
         return await m.answer(f"У [id{t}|пользователя] нет ролей в этой беседе.")
 
     if role_to_remove:
-        # Удаляем только конкретную роль
         all_roles = get_all_local_roles(pid, uid)
         if role_to_remove not in all_roles:
             return await m.answer(f"У [id{t}|пользователя] нет роли «{role_to_remove}».")
@@ -1229,13 +1192,12 @@ async def removerole(m: Message, args=None):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
         await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) роль «{role_to_remove}» [id{t}|пользователю]")
     else:
-        # Без указания роли — удаляем все роли
         del DATABASE["chats"][pid]["staff"][uid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
         await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) все уровни прав [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
-# /gunrole — снять глобальную роль (зам, основной зам)
+# /gunrole
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/gunrole", "/gunrole <args>"])
 async def gunrole_cmd(m: Message, args=None):
@@ -1247,11 +1209,9 @@ async def gunrole_cmd(m: Message, args=None):
         return await m.answer("Нельзя снимать права у самого себя.")
     gstaff = STAFF["gstaff"]
     removed = False
-    # Снимаем из зам. спец. руководителей
     if t in gstaff.get("zams", []):
         gstaff["zams"].remove(t)
         removed = True
-    # Снимаем основного зама (только Спец. Руководитель)
     if gstaff.get("main_zam") == t:
         rank, _ = get_user_info(m.peer_id, m.from_id)
         if RANK_WEIGHT.get(rank, 0) >= 10:
@@ -1259,7 +1219,6 @@ async def gunrole_cmd(m: Message, args=None):
             removed = True
         else:
             return await m.answer("Снять Основного Зам. может только Специальный Руководитель.")
-    # Снимаем роль тестировщика
     uid = str(t)
     if uid in STAFF.get("testers", {}):
         del STAFF["testers"][uid]
@@ -1272,6 +1231,7 @@ async def gunrole_cmd(m: Message, args=None):
 
 # ────────────────────────────────────────────────
 # /staff
+# ОБНОВЛЕНО по Notion (статус: Готово)
 # ────────────────────────────────────────────────
 @bot.on.message(text="/staff")
 async def staff_view(m: Message):
@@ -1291,7 +1251,6 @@ async def staff_view(m: Message):
     for r in order:
         members = []
         for u, entry in staff.items():
-            # Собираем все роли пользователя (primary + extra)
             all_u_roles = [entry[0]]
             if len(entry) > 2 and isinstance(entry[2], list):
                 all_u_roles += entry[2]
@@ -1329,16 +1288,13 @@ async def staff_view(m: Message):
     await m.answer("\n\n".join(blocks))
 
 # ────────────────────────────────────────────────
-# /setnick — ИСПРАВЛЕНО: поддержка reply
-# Способ 1: /setnick [ссылка] [ник]
-# Способ 2: ответом на сообщение -> /setnick [ник]
+# /setnick
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/setnick", "/setnick <args>"])
 async def setnick(m: Message, args=None):
     if not await check_access(m, "Модератор"): return
 
     if getattr(m, "reply_message", None):
-        # Режим reply: цель из reply, args — это целиком ник
         t = m.reply_message.from_id
         new_nick = (args or "").strip()
         if not new_nick:
@@ -1357,12 +1313,8 @@ async def setnick(m: Message, args=None):
     pid, uid    = str(m.peer_id), str(t)
     ensure_chat(pid)
     role_now, _ = get_user_info(m.peer_id, t)
-    # Получаем имена ДО сохранения ника, иначе t_display вернёт только что выданный ник
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    # Ник можно выдать любому включая владельца.
-    # В /staff владелец всегда отображается как MANLIX MANAGER (независимо от ника)
-    # Сохраняем все существующие роли, меняем только ник
     existing_entry = DATABASE["chats"][pid]["staff"].get(uid)
     extra_roles = existing_entry[2] if existing_entry and len(existing_entry) > 2 else []
     DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick, extra_roles]
@@ -1370,9 +1322,7 @@ async def setnick(m: Message, args=None):
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
 
 # ────────────────────────────────────────────────
-# /rnick — ИСПРАВЛЕНО: поддержка reply
-# Способ 1: /rnick [ссылка]
-# Способ 2: ответом на сообщение -> /rnick
+# /rnick
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/rnick", "/rnick <args>"])
 async def rnick(m: Message, args=None):
@@ -1408,12 +1358,11 @@ async def nick_list(m: Message):
     await m.answer(msg.strip())
 
 # ────────────────────────────────────────────────
-# /getban — ИСПРАВЛЕНО: заголовок "Информация о Блокировках [ссылка|пользователя]"
+# /getban
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/getban", "/getban <args>"])
 async def getban_cmd(m: Message, args=None):
     if not await check_access(m, "Модератор"): return
-    # Поддержка reply + ссылок + id
     t = None
     if getattr(m, "reply_message", None):
         t = m.reply_message.from_id
@@ -1428,10 +1377,8 @@ async def getban_cmd(m: Message, args=None):
     except:
         name = "пользователь"
 
-    # Строчный регистр в заголовке — требование пользователя
     ans = f"Информация о блокировках [id{t}|пользователя]\n"
 
-    # Глобальный бан в беседах
     if uid in PUNISHMENTS.get("gbans_status", {}):
         b  = PUNISHMENTS["gbans_status"][uid]
         dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
@@ -1442,7 +1389,6 @@ async def getban_cmd(m: Message, args=None):
     else:
         ans += "\nИнформация о общей блокировке в беседах: отсутствует\n"
 
-    # Глобальный бан в играх
     if uid in PUNISHMENTS.get("gbans_pl", {}):
         b  = PUNISHMENTS["gbans_pl"][uid]
         dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
@@ -1453,7 +1399,6 @@ async def getban_cmd(m: Message, args=None):
     else:
         ans += "\nИнформация о блокировке в беседах игроков: отсутствует\n"
 
-    # Локальные баны
     local_bans = []
     for pid_b, bans in PUNISHMENTS.get("bans", {}).items():
         if uid in bans:
@@ -1475,25 +1420,37 @@ async def getban_cmd(m: Message, args=None):
 
 # ────────────────────────────────────────────────
 # /gstaff
+# ОБНОВЛЕНО по Notion (статус: Готово)
+# Изменение: используем get_display_name вместо хардкода "MANLIX"
 # ────────────────────────────────────────────────
 @bot.on.message(text="/gstaff")
 async def gstaff_view(m: Message):
     if not await check_access(m, "Зам. Спец. Руководителя"): return
     g   = STAFF["gstaff"]
     res = "MANLIX MANAGER | Команда Бота:\n\n"
-    res += "| Специальный Руководитель:\n– [id870757778|MANLIX]\n\n"
+
+    # Специальный Руководитель
+    spec_name = await get_display_name(870757778)
+    res += f"| Специальный Руководитель:\n– [id870757778|{spec_name}]\n\n"
+
+    # Основной Зам. Спец. Руководителя
     res += "| Основной зам. Спец. Руководителя:\n"
     if g.get("main_zam"):
-        res += f"– [id{g['main_zam']}|MANLIX]\n"
+        main_zam_name = await get_display_name(g["main_zam"])
+        res += f"– [id{g['main_zam']}|{main_zam_name}]\n"
     else:
         res += "– Отсутствует.\n"
+
+    # Зам. Спец. Руководителя
     res += "\n| Зам. Спец. Руководителя:\n"
     zams = g.get("zams", [])
     if zams:
         for z in zams:
-            res += f"– [id{z}|MANLIX]\n"
+            zam_name = await get_display_name(z)
+            res += f"– [id{z}|{zam_name}]\n"
     else:
         res += "– Отсутствует.\n– Отсутствует.\n"
+
     await m.answer(res.strip())
 
 # ────────────────────────────────────────────────
@@ -1511,7 +1468,6 @@ async def start(m: Message):
             DATABASE["chats"][pid]["title"] = conv.items[0].chat_settings.title
     except:
         pass
-    # Сохраняем group_id для /staff
     if GROUP_ID is None:
         try:
             grp = await bot.api.groups.get_by_id()
@@ -1551,7 +1507,7 @@ async def type_cmd(m: Message, args=None):
     )
 
 # ────────────────────────────────────────────────
-# /typetex — технические типы бесед
+# /typetex
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/typetex", "/typetex <args>"])
 async def typetex_cmd(m: Message, args=None):
@@ -1633,7 +1589,7 @@ async def botstatus_cmd(m: Message, args=None):
     await m.answer(f"Вы успешно изменили статус бота на « {new_status} »")
 
 # ────────────────────────────────────────────────
-# /msg — рассылка во все беседы выбранного типа
+# /msg
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/msg", "/msg <args>"])
 async def msg_cmd(m: Message, args=None):
@@ -1758,7 +1714,6 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
     """Выдача ролей тестировщиков."""
     t_role, _ = get_tester_info(m.from_id)
     my_global, _ = get_user_info(m.peer_id, m.from_id)
-    # Доступ: нужная роль тестировщика ИЛИ глобальный ранг >= ЗСР
     has_access = (
         TESTER_RANK_WEIGHT.get(t_role, 0) >= TESTER_RANK_WEIGHT.get(min_tester_role, 0)
         or RANK_WEIGHT.get(my_global, 0) >= 8
@@ -1781,7 +1736,6 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
 
 @bot.on.message(text="/thelp")
 async def thelp_cmd(m: Message):
-    # Работает только в беседах типа "test" (или руководство)
     pid = str(m.peer_id)
     ensure_chat(pid)
     chat_type = DATABASE["chats"][pid].get("type", "def")
@@ -1795,7 +1749,6 @@ async def thelp_cmd(m: Message):
     w_global = RANK_WEIGHT.get(my_global, 0)
     t_w = TESTER_RANK_WEIGHT.get(t_role, 0)
 
-    # Базовые команды — доступны всем тестировщикам
     msg = (
         "Команды тестировщиков:\n"
         "/tstats -- статистика тестировщика.\n"
@@ -1803,14 +1756,12 @@ async def thelp_cmd(m: Message):
         "/bug -- отчет багов."
     )
 
-    # Старший тестировщик и выше
     if t_w >= 2 or w_global >= 8:
         msg += (
             "\n\nКоманды старших тестировщиков:\n"
             "/add -- отправить предложение по улучшению."
         )
 
-    # Главный тестировщик и выше
     if t_w >= 3 or w_global >= 8:
         msg += (
             "\n\nКоманды главного тестировщика:\n"
@@ -1819,7 +1770,6 @@ async def thelp_cmd(m: Message):
             "/removetester -- забрать права тестировщика."
         )
 
-    # Спец. руководство
     if w_global >= 8:
         msg += (
             "\n\nКоманды спец. Руководства:\n"
@@ -1832,7 +1782,6 @@ async def thelp_cmd(m: Message):
 
 @bot.on.message(text=["/tstats", "/tstats <args>"])
 async def tstats_cmd(m: Message, args=None):
-    # Работает только в беседах типа "test" (или руководство)
     pid = str(m.peer_id)
     ensure_chat(pid)
     chat_type = DATABASE["chats"][pid].get("type", "def")
@@ -1856,7 +1805,6 @@ async def tstats_cmd(m: Message, args=None):
 
 @bot.on.message(text=["/bug", "/bug <args>"])
 async def bug_cmd(m: Message, args=None):
-    # Работает только в беседах типа "test"
     pid = str(m.peer_id)
     ensure_chat(pid)
     chat_type = DATABASE["chats"][pid].get("type", "def")
@@ -1876,11 +1824,9 @@ async def bug_cmd(m: Message, args=None):
 
     bug_text = (args or "").strip()
 
-    # Подтверждение тестировщику — ник в беседе если есть, иначе имя ВК
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] отправил отчет с Багами.")
 
-    # В репорте всегда надпись MANLIX
     now = datetime.datetime.now(TZ_MSK)
     report = (
         f"…::: BUG REPORT :::…\n\n"
@@ -1890,7 +1836,6 @@ async def bug_cmd(m: Message, args=None):
         f"| Отчет: « {bug_text} »"
     )
 
-    # Отправляем во все беседы типа "bug"
     for pid_c, chat in list(DATABASE.get("chats", {}).items()):
         if chat.get("type") == "bug":
             try:
@@ -1904,7 +1849,6 @@ async def bug_cmd(m: Message, args=None):
 
 @bot.on.message(text="/tstaff")
 async def tstaff_cmd(m: Message):
-    # Доступна только в беседах типа "test" или руководству
     pid = str(m.peer_id)
     ensure_chat(pid)
     chat_type = DATABASE["chats"][pid].get("type", "def")
@@ -1918,7 +1862,6 @@ async def tstaff_cmd(m: Message):
     testers = STAFF.get("testers", {})
     gstaff  = STAFF.get("gstaff", {})
 
-    # Список ID глобального руководства — они не отображаются в /tstaff
     spec_ids = set()
     spec_ids.add(str(gstaff.get("spec", 870757778)))
     spec_ids.add(str(870757778))
@@ -1927,7 +1870,6 @@ async def tstaff_cmd(m: Message):
     for z in gstaff.get("zams", []):
         spec_ids.add(str(z))
 
-    # Фильтруем — руководство не показываем
     gt_list  = [(uid, data) for uid, data in testers.items()
                 if data.get("role") == "Главный Тестировщик" and uid not in spec_ids]
     sen_list = [(uid, data) for uid, data in testers.items()
@@ -1937,7 +1879,6 @@ async def tstaff_cmd(m: Message):
 
     res = "MANLIX MANAGER | Тестировщики\n\n"
 
-    # Главный тестировщик
     if gt_list:
         gt_uid = gt_list[0][0]
         res += f"Главный тестировщик -- [id{gt_uid}|MANLIX]\n"
@@ -1946,7 +1887,6 @@ async def tstaff_cmd(m: Message):
     else:
         res += "Главный тестировщик -- Отсутствует.\n"
 
-    # Старшие тестировщики
     res += "\nСтаршие тестировщики:\n"
     if sen_list:
         for uid, _ in sen_list:
@@ -1954,7 +1894,6 @@ async def tstaff_cmd(m: Message):
     else:
         res += "– Отсутствуют.\n"
 
-    # Тестировщики
     res += "\nТестировщики:\n"
     if t_list:
         for uid, _ in t_list:
@@ -1966,7 +1905,6 @@ async def tstaff_cmd(m: Message):
 
 @bot.on.message(text=["/add", "/add <args>"])
 async def add_cmd(m: Message, args=None):
-    # Доступно Старшему тестировщику и выше
     t_role, _ = get_tester_info(m.from_id)
     my_global, _ = get_user_info(m.peer_id, m.from_id)
     has_access = (
@@ -1984,7 +1922,6 @@ async def add_cmd(m: Message, args=None):
         return await m.answer("Укажите предложение. Пример: /add [предложение]")
     suggestion = args.strip()
     now = datetime.datetime.now(TZ_MSK)
-    # Отправляем в беседу типа "add"
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     form = (
         "…::: ПРЕДЛОЖЕНИЕ :::…\n\n"
@@ -2017,7 +1954,6 @@ async def addsentester_cmd(m: Message, args=None):
 
 @bot.on.message(text=["/addgt", "/addgt <args>"])
 async def addgt_cmd(m: Message, args=None):
-    # Только Зам. Спец. Руководителя и выше
     if not await check_access(m, "Зам. Спец. Руководителя"): return
     t = await get_target_id(m, args)
     if not t:
@@ -2035,7 +1971,6 @@ async def addgt_cmd(m: Message, args=None):
 
 @bot.on.message(text=["/removetester", "/removetester <args>"])
 async def removetester_cmd(m: Message, args=None):
-    # Доступно Главному тестировщику и выше
     t_role, _ = get_tester_info(m.from_id)
     my_global, _ = get_user_info(m.peer_id, m.from_id)
     has_access = (
@@ -2213,7 +2148,7 @@ async def duel_create(m: Message, amount=None):
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
 
 # ────────────────────────────────────────────────
-# /invite — доступ к добавлению только для модерации
+# /invite
 # ────────────────────────────────────────────────
 @bot.on.message(text="/invite")
 async def invite_cmd(m: Message):
@@ -2230,7 +2165,7 @@ async def invite_cmd(m: Message):
         await m.answer(f"[id{m.from_id}|{a_display}] отключил(-а) функцию добавления только модерацией!")
 
 # ────────────────────────────────────────────────
-# /quit — режим тишины
+# /quit
 # ────────────────────────────────────────────────
 @bot.on.message(text="/quit")
 async def quit_cmd(m: Message):
@@ -2247,7 +2182,7 @@ async def quit_cmd(m: Message):
         await m.answer(f"[id{m.from_id}|{a_display}] выключил(-а) режим тишины!")
 
 # ────────────────────────────────────────────────
-# /filter — фильтр запрещённых слов
+# /filter
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/filter", "/filter <args>"])
 async def filter_cmd(m: Message, args=None):
@@ -2258,7 +2193,6 @@ async def filter_cmd(m: Message, args=None):
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
 
     if not args or not args.strip():
-        # Переключатель — только Владелец
         if w < 7:
             return await m.answer("Недостаточно прав!")
         current = DATABASE["chats"][pid].get("filter_enabled", False)
@@ -2275,7 +2209,6 @@ async def filter_cmd(m: Message, args=None):
     word   = parts[1].strip().lower() if len(parts) > 1 else ""
 
     if subcmd == "add":
-        # Только Основной ЗСР и выше
         if w < 9:
             return await m.answer("Недостаточно прав!")
         if not word:
@@ -2284,7 +2217,6 @@ async def filter_cmd(m: Message, args=None):
         if word not in words:
             words.append(word)
             DATABASE["chats"][pid]["filter_words"] = words
-        # ФИКС: автоматически включаем фильтр если он был выключен
         was_disabled = not DATABASE["chats"][pid].get("filter_enabled", False)
         DATABASE["chats"][pid]["filter_enabled"] = True
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
@@ -2292,7 +2224,6 @@ async def filter_cmd(m: Message, args=None):
         await m.answer(f"[id{m.from_id}|{a_display}] добавил(-а) новое запрещённое слово в фильтр{extra}.")
 
     elif subcmd == "del":
-        # Только Основной ЗСР и выше
         if w < 9:
             return await m.answer("Недостаточно прав!")
         if not word:
@@ -2308,7 +2239,7 @@ async def filter_cmd(m: Message, args=None):
         await m.answer("Неизвестная подкоманда. Используй: /filter, /filter add [слово], /filter del [слово]")
 
 # ────────────────────────────────────────────────
-# /filterlist — список запрещённых слов
+# /filterlist
 # ────────────────────────────────────────────────
 @bot.on.message(text="/filterlist")
 async def filterlist_cmd(m: Message):
@@ -2350,7 +2281,6 @@ async def actions(m: Message):
         if not invited:
             return
 
-        # Бот добавлен в беседу (member_id отрицательный)
         if invited < 0:
             await bot.api.messages.send(
                 peer_id=m.peer_id,
@@ -2363,12 +2293,10 @@ async def actions(m: Message):
             )
             return
 
-        # Пользователь добавлен
         uid = str(invited)
         pid = str(m.peer_id)
         ensure_chat(pid)
 
-        # Проверяем invite_only — добавлять может только модерация (ранг >= 1)
         if DATABASE["chats"][pid].get("invite_only", False):
             inviter_rank, _ = get_user_info(m.peer_id, m.from_id)
             if RANK_WEIGHT.get(inviter_rank, 0) < 1:
@@ -2379,7 +2307,6 @@ async def actions(m: Message):
                     pass
                 return
 
-        # Проверяем глобальный бан
         if uid in PUNISHMENTS.get("gbans_status", {}):
             b  = PUNISHMENTS["gbans_status"][uid]
             dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
@@ -2397,7 +2324,6 @@ async def actions(m: Message):
             )
             return
 
-        # Если в локальном или игровом бане — исключить
         banned = (
             uid in PUNISHMENTS.get("gbans_pl",     {}) or
             uid in PUNISHMENTS.get("bans", {}).get(pid, {})
