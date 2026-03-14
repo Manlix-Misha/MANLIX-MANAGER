@@ -742,6 +742,11 @@ async def all_buttons(event: MessageEvent):
         uid = str(payload.get("uid", ""))
         ensure_chat(pid)
 
+        # Замученный не может снять мут сам себе
+        if cmd == "unmute_btn" and str(actor_id) == uid:
+            await snackbar("Вы не можете снять мут самому себе!")
+            return
+
         rank, _ = get_user_info(peer_id, actor_id)
         if RANK_WEIGHT.get(rank, 0) < 1:
             await snackbar("Недостаточно прав")
@@ -1190,11 +1195,11 @@ async def removerole(m: Message, args=None):
             rest = [r for r in all_roles if r != top]
             DATABASE["chats"][pid]["staff"][uid] = [top, nick, rest]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) роль «{role_to_remove}» [id{t}|пользователю]")
+        await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|пользователю]")
     else:
         del DATABASE["chats"][pid]["staff"][uid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) все уровни прав [id{t}|пользователю]")
+        await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
 # /gunrole
