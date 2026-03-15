@@ -660,18 +660,18 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 70,
-                    "last": 1773604090.613911
+                    "count": 74,
+                    "last": 1773604110.029235
                 },
                 "673768778": {
-                    "count": 42,
-                    "last": 1773604086.277538
+                    "count": 46,
+                    "last": 1773604238.252413
                 }
             },
             "type": "test",
             "invite_only": false,
             "quit_mode": false,
-            "filter_enabled": false,
+            "filter_enabled": true,
             "filter_words": []
         }
     },
