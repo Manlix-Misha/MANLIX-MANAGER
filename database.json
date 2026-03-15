@@ -370,8 +370,8 @@
             },
             "stats": {
                 "870757778": {
-                    "count": 620,
-                    "last": 1773600026.593004
+                    "count": 624,
+                    "last": 1773602714.576849
                 },
                 "778382713": {
                     "count": 604,
@@ -386,8 +386,8 @@
                     "last": 1773266386.092191
                 },
                 "770181550": {
-                    "count": 96,
-                    "last": 1773594245.121749
+                    "count": 97,
+                    "last": 1773600897.869076
                 },
                 "774553552": {
                     "count": 33,
@@ -636,6 +636,22 @@
                 }
             },
             "type": "pl",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
+        },
+        "2000000035": {
+            "title": "ХУЙ",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "870757778": {
+                    "count": 1,
+                    "last": 1773602782.437122
+                }
+            },
+            "type": "def",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
