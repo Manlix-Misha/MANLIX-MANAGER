@@ -664,8 +664,8 @@
                     "last": 1773604574.276087
                 },
                 "673768778": {
-                    "count": 70,
-                    "last": 1773604595.091711
+                    "count": 71,
+                    "last": 1773604600.566881
                 },
                 "1053323215": {
                     "count": 1,
@@ -674,7 +674,7 @@
             },
             "type": "test",
             "invite_only": false,
-            "quit_mode": true,
+            "quit_mode": false,
             "filter_enabled": false,
             "filter_words": []
         }
