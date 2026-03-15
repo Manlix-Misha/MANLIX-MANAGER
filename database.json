@@ -658,15 +658,15 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 40,
-                    "last": 1773603554.032312
+                    "count": 45,
+                    "last": 1773603597.64127
                 },
                 "673768778": {
-                    "count": 30,
-                    "last": 1773603547.086744
+                    "count": 33,
+                    "last": 1773603584.995302
                 }
             },
-            "type": "pl",
+            "type": "test",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
