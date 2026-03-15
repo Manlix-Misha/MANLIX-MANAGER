@@ -664,13 +664,13 @@
                     "last": 1773604480.444737
                 },
                 "673768778": {
-                    "count": 60,
-                    "last": 1773604477.362646
+                    "count": 63,
+                    "last": 1773604534.202352
                 }
             },
             "type": "test",
             "invite_only": false,
-            "quit_mode": false,
+            "quit_mode": true,
             "filter_enabled": false,
             "filter_words": []
         }
