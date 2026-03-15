@@ -370,8 +370,8 @@
             },
             "stats": {
                 "870757778": {
-                    "count": 626,
-                    "last": 1773603146.559573
+                    "count": 627,
+                    "last": 1773610022.773778
                 },
                 "778382713": {
                     "count": 604,
@@ -665,12 +665,12 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 95,
-                    "last": 1773604931.692498
+                    "count": 96,
+                    "last": 1773605533.526922
                 },
                 "673768778": {
-                    "count": 90,
-                    "last": 1773605055.072696
+                    "count": 97,
+                    "last": 1773605218.060969
                 },
                 "1053323215": {
                     "count": 2,
@@ -678,6 +678,26 @@
                 }
             },
             "type": "test",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
+        },
+        "2000000036": {
+            "title": "!",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "1058882617": {
+                    "count": 2,
+                    "last": 1773611894.036756
+                },
+                "870757778": {
+                    "count": 1,
+                    "last": 1773611893.545372
+                }
+            },
+            "type": "def",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
