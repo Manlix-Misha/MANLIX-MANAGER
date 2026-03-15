@@ -1317,12 +1317,19 @@ async def setnick(m: Message, args=None):
 
     pid, uid    = str(m.peer_id), str(t)
     ensure_chat(pid)
-    role_now, _ = get_user_info(m.peer_id, t)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
+    # ФИКС: берём роль и extra_roles из существующей локальной записи,
+    # НЕ из get_user_info — та возвращает глобальную роль (СР/ОЗСР/ЗСР),
+    # что перезаписывало бы локальную роль в беседе.
     existing_entry = DATABASE["chats"][pid]["staff"].get(uid)
-    extra_roles = existing_entry[2] if existing_entry and len(existing_entry) > 2 else []
-    DATABASE["chats"][pid]["staff"][uid] = [role_now, new_nick, extra_roles]
+    if existing_entry:
+        local_role  = existing_entry[0]
+        extra_roles = existing_entry[2] if len(existing_entry) > 2 else []
+    else:
+        local_role  = "Пользователь"
+        extra_roles = []
+    DATABASE["chats"][pid]["staff"][uid] = [local_role, new_nick, extra_roles]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
 
