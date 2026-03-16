@@ -533,8 +533,9 @@ async def help_cmd(m: Message):
     if w >= 3:
         res += (
             "\n\nКоманды администраторов:\n"
-            "/addsenmoder -- Выдать права старшего модератора.\n"
-            "/quit -- включить/выключить режим тишины."
+            "/addsenmoder -- выдать права старшего модератора.\n"
+            "/quit -- включить/выключить режим тишины.\n"
+            "/rnickall -- очистить все ники в Беседе."
         )
     if w >= 4:
         res += (
@@ -884,7 +885,9 @@ async def all_buttons(event: MessageEvent):
             loser  = [p for p in duel["participants"] if p != winner][0]
             amount = duel["amount"]
             ECONOMY[winner]["cash"] = ECONOMY[winner].get("cash", 0) + amount
+            ECONOMY[winner]["duel_wins"] = ECONOMY[winner].get("duel_wins", 0) + amount
             ECONOMY[loser]["cash"]  = ECONOMY[loser].get("cash",  0) - amount
+            ECONOMY[loser]["duel_losses"] = ECONOMY[loser].get("duel_losses", 0) + amount
             await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
             del DATABASE["duels"][duel_id]
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
@@ -1353,6 +1356,23 @@ async def rnick(m: Message, args=None):
     await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
+# /rnickall
+# ────────────────────────────────────────────────
+@bot.on.message(text="/rnickall")
+async def rnickall(m: Message):
+    if not await check_access(m, "Администратор"): return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    staff = DATABASE["chats"][pid].get("staff", {})
+    for uid, entry in staff.items():
+        if entry[1] is not None:
+            extra = entry[2] if len(entry) > 2 else []
+            DATABASE["chats"][pid]["staff"][uid] = [entry[0], None, extra]
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|{a_display}] удалил(-а) все установленные ники в Беседе.")
+
+# ────────────────────────────────────────────────
 # /nlist
 # ────────────────────────────────────────────────
 @bot.on.message(text="/nlist")
@@ -1526,7 +1546,7 @@ async def typetex_cmd(m: Message, args=None):
     if not await check_access(m, "Специальный Руководитель"): return
     pid   = str(m.peer_id)
     ensure_chat(pid)
-    valid = ["tex", "bug", "add"]
+    valid = ["tex", "bug", "add", "logs", "glogs"]
     if args:
         new_type = args.strip().lower()
         if new_type in valid:
@@ -1541,7 +1561,9 @@ async def typetex_cmd(m: Message, args=None):
         f"Беседа имеет тип: {current}\n\n"
         "tex - Тех. Раздел\n"
         "bug - Баг-трекер\n"
-        "add - Беседа предложений"
+        "add - Беседа предложений\n"
+        "logs - Беседа логов\n"
+        "glogs - Беседа глобальных логов"
     )
 
 # ────────────────────────────────────────────────
@@ -1721,6 +1743,14 @@ def get_tester_info(user_id: int):
     if entry:
         return entry.get("role"), entry.get("bugs", 0)
     return None, 0
+
+def get_texspec_info(user_id: int):
+    """Возвращает роль технического специалиста или None."""
+    uid = str(user_id)
+    entry = STAFF.get("texstaff", {}).get(uid)
+    if entry:
+        return entry.get("role", "Технический Специалист")
+    return None
 
 async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_label):
     """Выдача ролей тестировщиков."""
@@ -2005,6 +2035,119 @@ async def removetester_cmd(m: Message, args=None):
     await m.answer(f"[id{m.from_id}|{a_display}] забрал(-а) права тестировщика [id{t}|пользователю]")
 
 # ────────────────────────────────────────────────
+# Система Технических Специалистов
+# ────────────────────────────────────────────────
+
+@bot.on.message(text="/texhelp")
+async def texhelp_cmd(m: Message):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_role = get_texspec_info(m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not tex_role and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Недостаточно прав!")
+    await m.answer(
+        "Команды Тех. Специалистов:\n"
+        "/texstats  -- информация о техническом специалисте.\n"
+        "/texstaff  -- команда технических специалистов.\n"
+        "/get  -- информация о пользователе.\n"
+        "/set  -- установить значение.\n"
+        "/reset  -- обнулить значение.\n"
+        "/give  -- выдача."
+    )
+
+@bot.on.message(text=["/get", "/get <args>"])
+async def get_cmd(m: Message, args=None):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_role = get_texspec_info(m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not tex_role and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Недостаточно прав!")
+    await m.answer(
+        "[/GET] Информация о команде:\n\n"
+        "/get_info  -- общая информация о пользователе.\n"
+        "/get_game  -- данные о пользователе."
+    )
+
+@bot.on.message(text=["/get_info", "/get_info <args>"])
+async def get_info_cmd(m: Message, args=None):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_role = get_texspec_info(m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not tex_role and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Недостаточно прав!")
+    t = await get_target_id(m, args) or m.from_id
+    uid = str(t)
+    # Кол-во Беседах где пользователь — Владелец
+    owner_count = sum(
+        1 for chat in DATABASE.get("chats", {}).values()
+        if uid in chat.get("staff", {}) and "Владелец" in get_all_local_roles(
+            str(list(DATABASE["chats"].keys())[list(DATABASE["chats"].values()).index(chat)]), uid
+        )
+    )
+    # Кол-во всех локальных банов
+    bans_cnt = sum(1 for bans in PUNISHMENTS.get("bans", {}).values() if uid in bans)
+    # Игровая блокировка
+    game_ban = 1 if uid in PUNISHMENTS.get("gbans_pl", {}) else 0
+    now = datetime.datetime.now(TZ_MSK)
+    await m.answer(
+        f"Информация о [id{t}|пользователе]\n\n"
+        f"| Владелец в кол-ве Бесед: « {owner_count} »\n"
+        f"| Кол-во Блокировок: « {bans_cnt} »\n"
+        f"| Игровая Блокировка: « {game_ban} »\n\n"
+        f"| Время: {now.strftime('%H:%M:%S')}\n"
+        f"| Дата: {now.strftime('%d/%m/%Y')}"
+    )
+
+@bot.on.message(text=["/get_game", "/get_game <args>"])
+async def get_game_cmd(m: Message, args=None):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_role = get_texspec_info(m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not tex_role and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Недостаточно прав!")
+    t = await get_target_id(m, args) or m.from_id
+    uid = str(t)
+    eco = ECONOMY.get(uid, {})
+    cash             = eco.get("cash", 0)
+    bank             = eco.get("bank", 0)
+    transfers_in     = eco.get("transfers_in", 0)
+    transfers_out    = eco.get("transfers_out", 0)
+    duel_wins_sum    = eco.get("duel_wins", 0)
+    duel_losses_sum  = eco.get("duel_losses", 0)
+    now = datetime.datetime.now(TZ_MSK)
+    await m.answer(
+        f"Информация о [id{t}|пользователе]\n\n"
+        f"| Баланс: « {cash}$ »\n"
+        f"| Счет в Банке: « {bank}$ »\n\n"
+        f"| Получено переводами: « {transfers_in}$ »\n"
+        f"| Было переведено: « {transfers_out}$ »\n"
+        f"| Выиграно в дуэлей: « {duel_wins_sum}$ »\n"
+        f"| Проиграно в дуэлей: « {duel_losses_sum}$ »\n\n"
+        f"| Время: {now.strftime('%H:%M:%S')}\n"
+        f"| Дата: {now.strftime('%d/%m/%Y')}"
+    )
+
+# ────────────────────────────────────────────────
 # Игровые команды
 # ────────────────────────────────────────────────
 @bot.on.message(text="/ghelp")
@@ -2107,7 +2250,9 @@ async def transfer(m: Message, args=None):
     if ECONOMY[uid].get("bank", 0) < amount:
         return await m.answer(f"Недостаточно средств на счете (есть {ECONOMY[uid].get('bank', 0)}$)")
     ECONOMY[uid]["bank"] -= amount
+    ECONOMY[uid]["transfers_out"] = ECONOMY[uid].get("transfers_out", 0) + amount
     ECONOMY[rid]["bank"] += amount
+    ECONOMY[rid]["transfers_in"] = ECONOMY[rid].get("transfers_in", 0) + amount
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"💲 Вы перевели [id{t}|{t_display}] {amount}$")
