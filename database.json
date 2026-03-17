@@ -800,11 +800,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 2,
-                    "last": 1773778725.308483
+                    "count": 3,
+                    "last": 1773778733.290909
                 }
             },
-            "type": "def",
+            "type": "logs",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
