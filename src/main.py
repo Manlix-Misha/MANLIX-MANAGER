@@ -692,7 +692,7 @@ async def mute_cmd(m: Message, args=None):
         keyboard=kb.get_json()
     )
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await send_log(m.peer_id, m.from_id, "Мут", f"| Мут выдан до: {dt}")
+    await send_log(m.peer_id, m.from_id, "Мут", extra=f"| Мут выдан до: {dt}", target_id=t)
 
 # ────────────────────────────────────────────────
 # /unmute
@@ -710,7 +710,7 @@ async def unmute_cmd(m: Message, args=None):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) мут [id{t}|{t_display}]")
-    await send_log(m.peer_id, m.from_id, "Снятие мута")
+    await send_log(m.peer_id, m.from_id, "Снятие мута", target_id=t)
 
 # ────────────────────────────────────────────────
 # Единый обработчик кнопок (мут + дуэль)
@@ -938,14 +938,15 @@ async def kick_cmd(m: Message, args=None):
     tgt_rank, _ = get_user_info(m.peer_id, t)
     if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
         return await m.answer("Невозможно исключить данного пользователя!")
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     try:
         chat_id = m.peer_id - 2000000000
         await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
     except Exception as e:
         print("kick error:", e)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+        return await m.answer(f"Не удалось исключить [id{t}|{t_display}]!")
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] исключил(-а) [id{t}|{t_display}] из Беседы.")
-    await send_log(m.peer_id, m.from_id, "Исключение")
+    await send_log(m.peer_id, m.from_id, "Исключение", target_id=t)
 
 # ────────────────────────────────────────────────
 # /ban
@@ -981,7 +982,7 @@ async def ban_cmd(m: Message, args=None):
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
-    await send_log(m.peer_id, m.from_id, "Блокировка")
+    await send_log(m.peer_id, m.from_id, "Блокировка", target_id=t)
 
 # ────────────────────────────────────────────────
 # /unban
@@ -998,7 +999,7 @@ async def unban_cmd(m: Message, args=None):
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
-    await send_log(m.peer_id, m.from_id, "Снятие Блокировки")
+    await send_log(m.peer_id, m.from_id, "Снятие Блокировки", target_id=t)
 
 # ────────────────────────────────────────────────
 # /warn / /unwarn
@@ -1050,7 +1051,7 @@ async def warn_cmd(m: Message, args=None):
         f"| Кол-во предупреждений: {current}/3",
         keyboard=kb.get_json()
     )
-    await send_log(m.peer_id, m.from_id, "Предупреждение")
+    await send_log(m.peer_id, m.from_id, "Предупреждение", target_id=t)
 
 @bot.on.message(text=["/unwarn", "/unwarn <args>"])
 async def unwarn_cmd(m: Message, args=None):
@@ -1349,7 +1350,7 @@ async def setnick(m: Message, args=None):
     DATABASE["chats"][pid]["staff"][uid] = [local_role, new_nick, extra_roles]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
-    await send_log(m.peer_id, m.from_id, "Выдача ника")
+    await send_log(m.peer_id, m.from_id, "Выдача ника", target_id=t)
 
 # ────────────────────────────────────────────────
 # /rnick
@@ -1369,7 +1370,7 @@ async def rnick(m: Message, args=None):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|пользователю]")
-    await send_log(m.peer_id, m.from_id, "Снятие ника")
+    await send_log(m.peer_id, m.from_id, "Снятие ника", target_id=t)
 
 # ────────────────────────────────────────────────
 # /rnickall
@@ -2064,26 +2065,40 @@ async def removetester_cmd(m: Message, args=None):
 # ────────────────────────────────────────────────
 # Система логов (тип беседы: logs)
 # ────────────────────────────────────────────────
-async def send_log(peer_id: int, moderator_id: int, action: str, extra: str = ""):
+async def send_log(peer_id: int, moderator_id: int, action: str, extra: str = "", target_id: int = None):
     """
-    Отправляет запись в все беседы типа 'logs'.
-    action  — текст действия (Мут, Исключение, Блокировка и т.д.)
-    extra   — доп. строка, например "| Мут выдан до: ..."
+    Отправляет запись во все беседы типа 'logs'.
+    action    — текст действия (Мут, Исключение, Блокировка и т.д.)
+    extra     — доп. строка, например "| Мут выдан до: ..."
+    target_id — ID пользователя, на которого направлено действие
     """
-    mod_display = await get_display_name(moderator_id, peer_id=peer_id)
-    chat_title  = DATABASE.get("chats", {}).get(str(peer_id), {}).get("title", f"Беседа {peer_id}")
-    now         = datetime.datetime.now(TZ_MSK)
+    mod_display  = await get_display_name(moderator_id, peer_id=peer_id)
+    chat_title   = DATABASE.get("chats", {}).get(str(peer_id), {}).get("title", f"Беседа {peer_id}")
+    now          = datetime.datetime.now(TZ_MSK)
+
+    # Строка цели
+    if target_id:
+        tgt_display = await get_display_name(target_id, peer_id=peer_id)
+        target_line = (
+            f"\n| Пользователь -- [id{target_id}|{tgt_display}]"
+            f"\n| VK ID пользователя: {target_id}"
+        )
+    else:
+        target_line = ""
+
     msg = (
         f"…::: MNLX LOGS :::…\n\n"
         f"| Беседа -- {chat_title}\n"
         f"| CHAT ID -- {peer_id}\n"
-        f"| Модератор -- [id{moderator_id}|{mod_display}]\n"
-        f"| Действие -- {action}"
+        f"| Действие -- {action}\n"
+        f"\n| Модератор -- [id{moderator_id}|{mod_display}]"
+        f"\n| VK ID модератора: {moderator_id}"
+        f"{target_line}"
     )
     if extra:
         msg += f"\n{extra}"
     msg += (
-        f"\n| Точное время: {now.strftime('%H:%M:%S')}"
+        f"\n\n| Точное время: {now.strftime('%H:%M:%S')}"
         f"\n| Дата: {now.strftime('%d/%m/%Y')}"
     )
     for pid_c, chat in list(DATABASE.get("chats", {}).items()):
