@@ -736,15 +736,15 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 14,
-                    "last": 1773756522.476281
+                    "count": 15,
+                    "last": 1773756531.227884
                 },
                 "778382713": {
-                    "count": 7,
-                    "last": 1773756517.002142
+                    "count": 9,
+                    "last": 1773756530.453395
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
