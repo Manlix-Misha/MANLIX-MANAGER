@@ -74,11 +74,15 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 5,
-                    "last": 1772827765.891637
+                    "count": 6,
+                    "last": 1773766136.229332
                 }
             },
-            "type": "tex"
+            "type": "tex",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
         },
         "2000000008": {
             "title": "MANLIX | ADMINS INFO",
@@ -536,8 +540,8 @@
                     "last": 1773744736.225949
                 },
                 "798274800": {
-                    "count": 160,
-                    "last": 1773762756.826029
+                    "count": 161,
+                    "last": 1773762778.211489
                 }
             },
             "type": "pl",
@@ -862,5 +866,5 @@
             "joined": 1773084755.2254214
         }
     },
-    "bot_status": "on"
+    "bot_status": "test"
 }
