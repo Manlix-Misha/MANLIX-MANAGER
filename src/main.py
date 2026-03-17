@@ -53,6 +53,14 @@ TESTER_RANK_WEIGHT = {
     "Главный Тестировщик": 3,
 }
 
+# Веса ролей Технических Специалистов
+TEX_RANK_WEIGHT = {
+    "Технический Специалист": 1,
+    "Куратор ТС":             2,
+    "Зам. Главного ТС":       3,
+    "Главный ТС":             4,
+}
+
 # ────────────────────────────────────────────────
 # HTTP-сервер
 # ────────────────────────────────────────────────
@@ -684,6 +692,7 @@ async def mute_cmd(m: Message, args=None):
         keyboard=kb.get_json()
     )
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    await send_log(m.peer_id, m.from_id, "Мут", f"| Мут выдан до: {dt}")
 
 # ────────────────────────────────────────────────
 # /unmute
@@ -701,6 +710,7 @@ async def unmute_cmd(m: Message, args=None):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) мут [id{t}|{t_display}]")
+    await send_log(m.peer_id, m.from_id, "Снятие мута")
 
 # ────────────────────────────────────────────────
 # Единый обработчик кнопок (мут + дуэль)
@@ -935,6 +945,7 @@ async def kick_cmd(m: Message, args=None):
         print("kick error:", e)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] исключил(-а) [id{t}|{t_display}] из Беседы.")
+    await send_log(m.peer_id, m.from_id, "Исключение")
 
 # ────────────────────────────────────────────────
 # /ban
@@ -970,6 +981,7 @@ async def ban_cmd(m: Message, args=None):
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
+    await send_log(m.peer_id, m.from_id, "Блокировка")
 
 # ────────────────────────────────────────────────
 # /unban
@@ -986,6 +998,7 @@ async def unban_cmd(m: Message, args=None):
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
+    await send_log(m.peer_id, m.from_id, "Снятие Блокировки")
 
 # ────────────────────────────────────────────────
 # /warn / /unwarn
@@ -1037,6 +1050,7 @@ async def warn_cmd(m: Message, args=None):
         f"| Кол-во предупреждений: {current}/3",
         keyboard=kb.get_json()
     )
+    await send_log(m.peer_id, m.from_id, "Предупреждение")
 
 @bot.on.message(text=["/unwarn", "/unwarn <args>"])
 async def unwarn_cmd(m: Message, args=None):
@@ -1335,6 +1349,7 @@ async def setnick(m: Message, args=None):
     DATABASE["chats"][pid]["staff"][uid] = [local_role, new_nick, extra_roles]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
+    await send_log(m.peer_id, m.from_id, "Выдача ника")
 
 # ────────────────────────────────────────────────
 # /rnick
@@ -1354,6 +1369,7 @@ async def rnick(m: Message, args=None):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|пользователю]")
+    await send_log(m.peer_id, m.from_id, "Снятие ника")
 
 # ────────────────────────────────────────────────
 # /rnickall
@@ -1371,6 +1387,7 @@ async def rnickall(m: Message):
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] удалил(-а) все установленные ники в Беседе.")
+    await send_log(m.peer_id, m.from_id, "Снятие всех ников")
 
 # ────────────────────────────────────────────────
 # /nlist
@@ -1752,6 +1769,15 @@ def get_texspec_info(user_id: int):
         return entry.get("role", "Технический Специалист")
     return None
 
+def can_tex(user_id: int, peer_id, min_tex_role: str = "Технический Специалист") -> bool:
+    """Проверяет доступ: тех. специалист нужного уровня ИЛИ глобальный ранг >= ЗСР."""
+    tex_role = get_texspec_info(user_id)
+    global_role, _ = get_user_info(peer_id, user_id)
+    return (
+        TEX_RANK_WEIGHT.get(tex_role, 0) >= TEX_RANK_WEIGHT.get(min_tex_role, 0)
+        or RANK_WEIGHT.get(global_role, 0) >= 8
+    )
+
 async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_label):
     """Выдача ролей тестировщиков."""
     t_role, _ = get_tester_info(m.from_id)
@@ -2034,6 +2060,43 @@ async def removetester_cmd(m: Message, args=None):
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] забрал(-а) права тестировщика [id{t}|пользователю]")
 
+
+# ────────────────────────────────────────────────
+# Система логов (тип беседы: logs)
+# ────────────────────────────────────────────────
+async def send_log(peer_id: int, moderator_id: int, action: str, extra: str = ""):
+    """
+    Отправляет запись в все беседы типа 'logs'.
+    action  — текст действия (Мут, Исключение, Блокировка и т.д.)
+    extra   — доп. строка, например "| Мут выдан до: ..."
+    """
+    mod_display = await get_display_name(moderator_id, peer_id=peer_id)
+    chat_title  = DATABASE.get("chats", {}).get(str(peer_id), {}).get("title", f"Беседа {peer_id}")
+    now         = datetime.datetime.now(TZ_MSK)
+    msg = (
+        f"…::: MNLX LOGS :::…\n\n"
+        f"| Беседа -- {chat_title}\n"
+        f"| CHAT ID -- {peer_id}\n"
+        f"| Модератор -- [id{moderator_id}|{mod_display}]\n"
+        f"| Действие -- {action}"
+    )
+    if extra:
+        msg += f"\n{extra}"
+    msg += (
+        f"\n| Точное время: {now.strftime('%H:%M:%S')}"
+        f"\n| Дата: {now.strftime('%d/%m/%Y')}"
+    )
+    for pid_c, chat in list(DATABASE.get("chats", {}).items()):
+        if chat.get("type") == "logs":
+            try:
+                await bot.api.messages.send(
+                    peer_id=int(pid_c),
+                    message=msg,
+                    random_id=random.randint(0, 2**31)
+                )
+            except Exception as e:
+                print(f"send_log error to {pid_c}: {e}")
+
 # ────────────────────────────────────────────────
 # Система Технических Специалистов
 # ────────────────────────────────────────────────
@@ -2050,15 +2113,22 @@ async def texhelp_cmd(m: Message):
         return await m.answer("Эта команда доступна только в технических беседах.")
     if not tex_role and RANK_WEIGHT.get(my_global, 0) < 8:
         return await m.answer("Недостаточно прав!")
-    await m.answer(
+    tex_role = get_texspec_info(m.from_id)
+    tex_w = TEX_RANK_WEIGHT.get(tex_role, 0)
+    msg = (
         "Команды Тех. Специалистов:\n"
         "/texstats  -- информация о техническом специалисте.\n"
         "/texstaff  -- команда технических специалистов.\n"
-        "/get  -- информация о пользователе.\n"
-        "/set  -- установить значение.\n"
-        "/reset  -- обнулить значение.\n"
-        "/give  -- выдача."
+        "/get  -- информация о пользователе."
     )
+    if tex_w >= 2 or RANK_WEIGHT.get(get_user_info(m.peer_id, m.from_id)[0], 0) >= 8:
+        msg += (
+            "\n\nКоманды Куратора ТС:\n"
+            "/set  -- установить значение.\n"
+            "/reset  -- обнулить значение.\n"
+            "/give  -- выдача."
+        )
+    await m.answer(msg)
 
 @bot.on.message(text=["/get", "/get <args>"])
 async def get_cmd(m: Message, args=None):
@@ -2145,6 +2215,62 @@ async def get_game_cmd(m: Message, args=None):
         f"| Проиграно в дуэлей: « {duel_losses_sum}$ »\n\n"
         f"| Время: {now.strftime('%H:%M:%S')}\n"
         f"| Дата: {now.strftime('%d/%m/%Y')}"
+    )
+
+
+@bot.on.message(text=["/reset", "/reset <args>"])
+async def reset_cmd(m: Message, args=None):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_role = get_texspec_info(m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not can_tex(m.from_id, m.peer_id, "Куратор ТС"):
+        return await m.answer("Недостаточно прав!")
+    await m.answer(
+        "[/RESET] Информация о команде:\n\n"
+        "/reset_money -- обнулить значение Баланса пользователю."
+    )
+
+@bot.on.message(text=["/reset_money", "/reset_money <args>"])
+async def reset_money_cmd(m: Message, args=None):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not can_tex(m.from_id, m.peer_id, "Куратор ТС"):
+        return await m.answer("Недостаточно прав!")
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя.")
+    uid = str(t)
+    if uid not in ECONOMY:
+        ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
+    total_before = ECONOMY[uid].get("cash", 0) + ECONOMY[uid].get("bank", 0)
+    ECONOMY[uid]["cash"] = 0
+    ECONOMY[uid]["bank"] = 0
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display    = await get_display_name(t, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|Технический Специалист] обнулил Баланс [id{t}|пользователю]"
+    )
+    # Второе сообщение — отчёт о действии
+    now = datetime.datetime.now(TZ_MSK)
+    await m.answer(
+        f"Информация о действии ТС:\n\n"
+        f"| Тех. Специалист -- [id{m.from_id}|{spec_display}]\n"
+        f"| VK ID Тех. Специалиста: {m.from_id}\n\n"
+        f"| Пользователь -- [id{t}|{t_display}]\n"
+        f"| VK ID пользователя: {t}\n"
+        f"| Общий Баланс до обнуления:\n"
+        f"« {total_before} »"
     )
 
 # ────────────────────────────────────────────────
