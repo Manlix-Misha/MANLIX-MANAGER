@@ -2371,10 +2371,10 @@ async def reset_chat_cmd(m: Message, args=None):
         target_pid = str(m.reply_message.peer_id)
     if not target_pid:
         return await m.answer("Укажите ID беседы. Пример: /reset_chat 2000000001")
+    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     if target_pid in DATABASE.get("chats", {}):
         del DATABASE["chats"][target_pid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) чат {target_pid}")
 
 @bot.on.message(text="/reset_chat_all")
@@ -2388,9 +2388,10 @@ async def reset_chat_all_cmd(m: Message):
         return await m.answer("Эта команда доступна только в технических беседах.")
     if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
         return await m.answer("Недостаточно прав!")
+    # Получаем имя ДО очистки — после DATABASE["chats"] будет пуст
+    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     DATABASE["chats"] = {}
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) все чаты из Базы данных.")
 
 @bot.on.message(text="/reset_economy")
@@ -2405,9 +2406,9 @@ async def reset_economy_cmd(m: Message):
     if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
         return await m.answer("Недостаточно прав!")
     global ECONOMY
+    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     ECONOMY = {}
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) экономику Бота.")
 
 # ────────────────────────────────────────────────
