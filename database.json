@@ -249,11 +249,11 @@
                     "last": 1773923049.608098
                 },
                 "870757778": {
-                    "count": 3,
-                    "last": 1773923065.657847
+                    "count": 4,
+                    "last": 1773923070.208013
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
