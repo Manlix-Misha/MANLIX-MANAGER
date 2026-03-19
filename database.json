@@ -204,15 +204,15 @@
                     "last": 1773921745.414117
                 },
                 "870757778": {
-                    "count": 14,
-                    "last": 1773921963.052658
+                    "count": 15,
+                    "last": 1773921970.250224
                 },
                 "657278822": {
                     "count": 10,
                     "last": 1773921968.150215
                 }
             },
-            "type": "def",
+            "type": "test",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
