@@ -327,11 +327,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 1,
-                    "last": 1773923803.583424
+                    "count": 2,
+                    "last": 1773923806.210641
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
