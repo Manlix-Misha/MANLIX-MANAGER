@@ -115,15 +115,15 @@
             "mutes": {},
             "stats": {
                 "778382713": {
-                    "count": 3,
-                    "last": 1773919747.239219
+                    "count": 6,
+                    "last": 1773919801.116134
                 },
                 "870757778": {
-                    "count": 5,
-                    "last": 1773919795.227871
+                    "count": 6,
+                    "last": 1773919807.227121
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
