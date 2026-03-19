@@ -152,7 +152,7 @@
                 }
             },
             "type": "pl",
-            "invite_only": false,
+            "invite_only": true,
             "quit_mode": false,
             "filter_enabled": false,
             "filter_words": []
