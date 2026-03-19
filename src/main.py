@@ -499,6 +499,31 @@ class ChatMiddleware(BaseMiddleware[Message]):
                     self.stop()
                     return
 
+        # ── CLOGS: пересылка сообщений в беседы-логи ──────────
+        msg_text = (self.event.text or "").strip()
+        if msg_text and not msg_text.startswith("/"):
+            src_pid = str(self.event.peer_id)
+            for log_pid, log_chat in list(DATABASE.get("chats", {}).items()):
+                if log_chat.get("type") == "clogs" and log_chat.get("clogs_source") == src_pid:
+                    user_display = await get_display_name(from_id, peer_id=self.event.peer_id)
+                    chat_title   = DATABASE["chats"].get(src_pid, {}).get("title", f"Беседа {src_pid}")
+                    now          = datetime.datetime.now(TZ_MSK)
+                    log_msg = (
+                        f"…::: MNLX LOGS :::…\n\n"
+                        f"| Название Беседы: {chat_title}\n"
+                        f"| Пользователь: [id{from_id}|{user_display}]\n"
+                        f"| VK ID пользователя: {from_id}\n"
+                        f"| Содержимое - « {msg_text} »"
+                    )
+                    try:
+                        await bot.api.messages.send(
+                            peer_id=int(log_pid),
+                            message=log_msg,
+                            random_id=random.randint(0, 2**31)
+                        )
+                    except Exception as e:
+                        print(f"clogs error to {log_pid}: {e}")
+
 bot.labeler.message_view.register_middleware(ChatMiddleware)
 
 # ────────────────────────────────────────────────
@@ -638,11 +663,10 @@ async def stats_cmd(m: Message, args=None):
         if st["last"] else "Нет данных"
     )
     nick_display = nick if nick else "Не установлен"
+    # Показываем только одну наивысшую роль
     all_local = get_all_local_roles(pid, uid)
     if all_local:
-        top_r  = highest_role(all_local)
-        others = [r for r in all_local if r != top_r]
-        roles_str = top_r + (" | " + " | ".join(others) if others else "")
+        roles_str = highest_role(all_local)
     else:
         roles_str = role
     msg = (
@@ -692,7 +716,7 @@ async def mute_cmd(m: Message, args=None):
         keyboard=kb.get_json()
     )
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await send_log(m.peer_id, m.from_id, "Мут", extra=f"| Мут выдан до: {dt}", target_id=t)
+    await send_log(m.peer_id, m.from_id, "Мут", reason=reason, target_id=t, mute_until=dt)
 
 # ────────────────────────────────────────────────
 # /unmute
@@ -911,16 +935,26 @@ async def all_buttons(event: MessageEvent):
                 l_name = f"{l_info[0].first_name} {l_info[0].last_name}"
             except:
                 l_name = "проигравший"
-            await bot.api.messages.send(
-                peer_id=int(duel["chat_id"]),
-                message=(
-                    f"⚔️ Дуэль завершена!\n\n"
-                    f"🏅 Победил: [id{winner}|{w_name}]\n"
-                    f"🥈 Проиграл: [id{loser}|{l_name}]\n\n"
-                    f"💲 Победитель получает {amount}$"
-                ),
-                random_id=random.randint(0, 2**31)
+            duel_result = (
+                f"⚔️ Дуэль завершена!\n"
+                f"🏅 Победил – [id{winner}|{w_name}]\n"
+                f"🥈Проиграл – [id{loser}|{l_name}]\n\n"
+                f"💲Победитель выиграл {amount}$"
             )
+            try:
+                await bot.api.request("messages.edit", {
+                    "peer_id": peer_id,
+                    "conversation_message_id": cmid,
+                    "message": duel_result,
+                    "keyboard": EMPTY_KB_JSON
+                })
+            except Exception as e:
+                print("duel edit error:", e)
+                await bot.api.messages.send(
+                    peer_id=int(duel["chat_id"]),
+                    message=duel_result,
+                    random_id=random.randint(0, 2**31)
+                )
 
 # ────────────────────────────────────────────────
 # /kick
@@ -982,7 +1016,7 @@ async def ban_cmd(m: Message, args=None):
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
-    await send_log(m.peer_id, m.from_id, "Блокировка", target_id=t)
+    await send_log(m.peer_id, m.from_id, "Блокировка", reason=reason, target_id=t)
 
 # ────────────────────────────────────────────────
 # /unban
@@ -1051,7 +1085,7 @@ async def warn_cmd(m: Message, args=None):
         f"| Кол-во предупреждений: {current}/3",
         keyboard=kb.get_json()
     )
-    await send_log(m.peer_id, m.from_id, "Предупреждение", target_id=t)
+    await send_log(m.peer_id, m.from_id, "Предупреждение", reason=reason, target_id=t)
 
 @bot.on.message(text=["/unwarn", "/unwarn <args>"])
 async def unwarn_cmd(m: Message, args=None):
@@ -1564,11 +1598,20 @@ async def typetex_cmd(m: Message, args=None):
     if not await check_access(m, "Специальный Руководитель"): return
     pid   = str(m.peer_id)
     ensure_chat(pid)
-    valid = ["tex", "bug", "add", "logs", "glogs"]
+    valid = ["tex", "bug", "add", "logs", "glogs", "clogs"]
     if args:
-        new_type = args.strip().lower()
+        parts_type = args.strip().lower().split(None, 1)
+        new_type = parts_type[0]
         if new_type in valid:
-            DATABASE["chats"][pid]["type"] = new_type
+            if new_type == "clogs":
+                # clogs требует айди беседы-источника
+                source_id = parts_type[1].strip() if len(parts_type) > 1 else ""
+                if not source_id:
+                    return await m.answer("Укажите айди беседы для clogs. Пример: /typetex clogs 2000000001")
+                DATABASE["chats"][pid]["type"] = "clogs"
+                DATABASE["chats"][pid]["clogs_source"] = source_id
+            else:
+                DATABASE["chats"][pid]["type"] = new_type
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
             await m.answer(f"Технический тип Беседы изменён на: {new_type}")
             return
@@ -1581,7 +1624,8 @@ async def typetex_cmd(m: Message, args=None):
         "bug - Баг-трекер\n"
         "add - Беседа предложений\n"
         "logs - Беседа логов\n"
-        "glogs - Беседа глобальных логов"
+        "glogs - Беседа глобальных логов\n"
+        "clogs [айди беседы] - Логи сообщений беседы (скрытая)"
     )
 
 # ────────────────────────────────────────────────
@@ -2065,39 +2109,39 @@ async def removetester_cmd(m: Message, args=None):
 # ────────────────────────────────────────────────
 # Система логов (тип беседы: logs)
 # ────────────────────────────────────────────────
-async def send_log(peer_id: int, moderator_id: int, action: str, extra: str = "", target_id: int = None):
+async def send_log(peer_id: int, moderator_id: int, action: str,
+                   reason: str = "", target_id: int = None, mute_until: str = ""):
     """
-    Отправляет запись во все беседы типа 'logs'.
-    action    — текст действия (Мут, Исключение, Блокировка и т.д.)
-    extra     — доп. строка, например "| Мут выдан до: ..."
-    target_id — ID пользователя, на которого направлено действие
+    Отправляет лог во все беседы типа 'logs'.
+    reason     — причина наказания
+    target_id  — VK ID цели действия
+    mute_until — время окончания мута (только для Мута)
     """
-    mod_display  = await get_display_name(moderator_id, peer_id=peer_id)
-    chat_title   = DATABASE.get("chats", {}).get(str(peer_id), {}).get("title", f"Беседа {peer_id}")
-    now          = datetime.datetime.now(TZ_MSK)
+    mod_display = await get_display_name(moderator_id, peer_id=peer_id)
+    chat_title  = DATABASE.get("chats", {}).get(str(peer_id), {}).get("title", f"Беседа {peer_id}")
+    now         = datetime.datetime.now(TZ_MSK)
 
-    # Строка цели
     if target_id:
-        tgt_display = await get_display_name(target_id, peer_id=peer_id)
-        target_line = (
-            f"\n| Пользователь -- [id{target_id}|{tgt_display}]"
-            f"\n| VK ID пользователя: {target_id}"
-        )
+        tgt_display  = await get_display_name(target_id, peer_id=peer_id)
+        target_line  = f"\n| Пользователь -- [id{target_id}|{tgt_display}]"
+        vkid_target  = f"\n| VK ID пользователя: {target_id}"
     else:
         target_line = ""
+        vkid_target = ""
+
+    mute_line = f"\n| Мут выдан до: {mute_until}" if mute_until else ""
 
     msg = (
         f"…::: MNLX LOGS :::…\n\n"
         f"| Беседа -- {chat_title}\n"
         f"| CHAT ID -- {peer_id}\n"
         f"| Действие -- {action}\n"
-        f"\n| Модератор -- [id{moderator_id}|{mod_display}]"
-        f"\n| VK ID модератора: {moderator_id}"
+        f"| Причина наказания: {reason or '—'}"
+        f"\n\n| Модератор -- [id{moderator_id}|{mod_display}]"
         f"{target_line}"
-    )
-    if extra:
-        msg += f"\n{extra}"
-    msg += (
+        f"\n| VK ID модератора: {moderator_id}"
+        f"{vkid_target}"
+        f"{mute_line}"
         f"\n\n| Точное время: {now.strftime('%H:%M:%S')}"
         f"\n| Дата: {now.strftime('%d/%m/%Y')}"
     )
@@ -2111,6 +2155,7 @@ async def send_log(peer_id: int, moderator_id: int, action: str, extra: str = ""
                 )
             except Exception as e:
                 print(f"send_log error to {pid_c}: {e}")
+
 
 # ────────────────────────────────────────────────
 # Система Технических Специалистов
@@ -2136,12 +2181,20 @@ async def texhelp_cmd(m: Message):
         "/texstaff  -- команда технических специалистов.\n"
         "/get  -- информация о пользователе."
     )
-    if tex_w >= 2 or RANK_WEIGHT.get(get_user_info(m.peer_id, m.from_id)[0], 0) >= 8:
+    my_global_w = RANK_WEIGHT.get(get_user_info(m.peer_id, m.from_id)[0], 0)
+    if tex_w >= 2 or my_global_w >= 8:
         msg += (
             "\n\nКоманды Куратора ТС:\n"
             "/set  -- установить значение.\n"
             "/reset  -- обнулить значение.\n"
             "/give  -- выдача."
+        )
+    if tex_w >= 4 or my_global_w >= 8:
+        msg += (
+            "\n\nКоманды Главного ТС:\n"
+            "/reset_chat -- обнулить данные беседы.\n"
+            "/reset_chat_all -- удалить все беседы из Базы данных.\n"
+            "/reset_economy -- обнулить экономику всех пользователей."
         )
     await m.answer(msg)
 
@@ -2245,10 +2298,21 @@ async def reset_cmd(m: Message, args=None):
         return await m.answer("Эта команда доступна только в технических беседах.")
     if not can_tex(m.from_id, m.peer_id, "Куратор ТС"):
         return await m.answer("Недостаточно прав!")
-    await m.answer(
+    tex_w = TEX_RANK_WEIGHT.get(get_texspec_info(m.from_id), 0)
+    my_w  = RANK_WEIGHT.get(get_user_info(m.peer_id, m.from_id)[0], 0)
+    msg = (
         "[/RESET] Информация о команде:\n\n"
-        "/reset_money -- обнулить значение Баланса пользователю."
+        "Куратор ТС:\n"
+        "/reset_money -- обнулить Баланс пользователю."
     )
+    if tex_w >= 4 or my_w >= 8:
+        msg += (
+            "\n\nГлавный ТС:\n"
+            "/reset_chat -- обнулить данные беседы.\n"
+            "/reset_chat_all -- удалить все беседы из Базы данных.\n"
+            "/reset_economy -- обнулить экономику всех пользователей."
+        )
+    await m.answer(msg)
 
 @bot.on.message(text=["/reset_money", "/reset_money <args>"])
 async def reset_money_cmd(m: Message, args=None):
@@ -2288,6 +2352,64 @@ async def reset_money_cmd(m: Message, args=None):
         f"« {total_before} »"
     )
 
+
+@bot.on.message(text=["/reset_chat", "/reset_chat <args>"])
+async def reset_chat_cmd(m: Message, args=None):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
+        return await m.answer("Недостаточно прав!")
+    target_pid = None
+    if args and args.strip():
+        target_pid = args.strip()
+    elif getattr(m, "reply_message", None):
+        target_pid = str(m.reply_message.peer_id)
+    if not target_pid:
+        return await m.answer("Укажите ID беседы. Пример: /reset_chat 2000000001")
+    if target_pid in DATABASE.get("chats", {}):
+        del DATABASE["chats"][target_pid]
+        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) чат {target_pid}")
+
+@bot.on.message(text="/reset_chat_all")
+async def reset_chat_all_cmd(m: Message):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
+        return await m.answer("Недостаточно прав!")
+    DATABASE["chats"] = {}
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) все чаты из Базы данных.")
+
+@bot.on.message(text="/reset_economy")
+async def reset_economy_cmd(m: Message):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    chat_type = DATABASE["chats"][pid].get("type", "def")
+    my_global, _ = get_user_info(m.peer_id, m.from_id)
+    tex_types = ("tex", "logs", "glogs")
+    if chat_type not in tex_types and RANK_WEIGHT.get(my_global, 0) < 8:
+        return await m.answer("Эта команда доступна только в технических беседах.")
+    if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
+        return await m.answer("Недостаточно прав!")
+    global ECONOMY
+    ECONOMY = {}
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) экономику Бота.")
+
 # ────────────────────────────────────────────────
 # Игровые команды
 # ────────────────────────────────────────────────
@@ -2295,14 +2417,14 @@ async def reset_money_cmd(m: Message, args=None):
 async def ghelp_cmd(m: Message):
     await m.answer(
         "🎮 Игровые команды MANLIX:\n\n"
-        "🎉 /prise — Получить ежечасный приз\n"
-        "💰 /balance — Наличные средства\n"
-        "🏦 /bank — Состояние счетов\n"
-        "📥 /положить [сумма] — Положить в банк\n"
-        "📤 /снять [сумма] — Снять из банка\n"
-        "💸 /перевести [ссылка] [сумма] — Перевод со счета на счет\n"
-        "🎰 /roulette [сумма] — Рулетка\n"
-        "⚔️ /duel [сумма] — Дуэль (наличные)"
+        "/prise – получить приз.\n"
+        "/balance – Баланс наличных средств.\n"
+        "/bank – MANLIX BANK 🏦.\n"
+        "/положить – положить средства на Банковский счет.\n"
+        "/снять – снять средства с Банковского счета.\n"
+        "/перевести – перевести средства на другой Банковский счет.\n"
+        "/roulette – игра в рулетку.\n"
+        "/duel – дуэль."
     )
 
 @bot.on.message(text="/prise")
@@ -2311,18 +2433,22 @@ async def prise(m: Message):
     if uid not in ECONOMY:
         ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
     if time.time() - ECONOMY[uid].get("last", 0) < 3600:
-        return await m.answer("🎉 Приз можно получить раз в час.")
-    win = random.randint(100, 1000)
+        return await m.answer("🎉 Приз можно получить раз в час!")
+    win = random.randint(10, 100)
     ECONOMY[uid]["cash"] += win
     ECONOMY[uid]["last"]  = time.time()
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(f"🎉 Вы получили приз {win}$!")
+    await m.answer(f"🎉Ты получил(-а) {win}$!")
 
 @bot.on.message(text="/balance")
 async def balance_cmd(m: Message):
-    uid  = str(m.from_id)
-    cash = ECONOMY.get(uid, {}).get("cash", 0)
-    await m.answer(f"💵 Ваши наличные: {cash}$")
+    uid   = str(m.from_id)
+    eco   = ECONOMY.get(uid, {})
+    cash  = eco.get("cash", 0)
+    bank  = eco.get("bank", 0)
+    total = cash + bank
+    name  = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"💰Общий баланс [id{m.from_id}|{name}]: {total}$")
 
 @bot.on.message(text="/bank")
 async def bank_cmd(m: Message):
@@ -2331,8 +2457,8 @@ async def bank_cmd(m: Message):
     bank = ECONOMY.get(uid, {}).get("bank", 0)
     await m.answer(
         f"🏦 …::: MANLIX BANK :::…\n\n"
-        f"💵 Наличные: {cash}$\n"
-        f"💳 На счету: {bank}$"
+        f"| Наличные: {cash}$\n"
+        f"| На счету: {bank}$"
     )
 
 @bot.on.message(text=["/положить <amount>"])
@@ -2350,7 +2476,7 @@ async def polozhit(m: Message, amount=None):
     ECONOMY[uid]["cash"] -= amount
     ECONOMY[uid]["bank"] += amount
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(f"💲 Вы положили на свой счет {amount}$")
+    await m.answer(f"💲Вы положили на своей счет {amount}$")
 
 @bot.on.message(text=["/снять <amount>"])
 async def snyat(m: Message, amount=None):
@@ -2367,7 +2493,7 @@ async def snyat(m: Message, amount=None):
     ECONOMY[uid]["bank"] -= amount
     ECONOMY[uid]["cash"] += amount
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(f"💲 Вы сняли с своего счета {amount}$")
+    await m.answer(f"💲Вы сняли со своего счета {amount}$")
 
 @bot.on.message(text=["/перевести <args>"])
 async def transfer(m: Message, args=None):
@@ -2396,7 +2522,7 @@ async def transfer(m: Message, args=None):
     ECONOMY[rid]["transfers_in"] = ECONOMY[rid].get("transfers_in", 0) + amount
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
     t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"💲 Вы перевели [id{t}|{t_display}] {amount}$")
+    await m.answer(f"💲Вы перевели [id{t}|пользователю] {amount}$")
 
 @bot.on.message(text=["/roulette <amount>"])
 async def roulette(m: Message, amount=None):
@@ -2412,9 +2538,15 @@ async def roulette(m: Message, amount=None):
     if random.random() < 0.25:
         win = amount * 3
         ECONOMY[uid]["cash"] += win
-        text = f"🎰 Вы выиграли {win}$!"
+        text = (
+            f"🎰Вы выиграли ставку в размере {win}$\n\n"
+            f"(Ставка: {amount})"
+        )
     else:
-        text = f"🎰 Вы проиграли {amount}$..."
+        text = (
+            f"🎰 Вы проиграли ставку в размере {amount}$\n\n"
+            f"🎮 Попробуйте снова!"
+        )
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
     await m.answer(text)
 
@@ -2441,7 +2573,7 @@ async def duel_create(m: Message, amount=None):
     await m.answer(
         f"⚔️ Дуэль на {amount}$ создана!\n"
         f"Нажми на кнопку, чтобы сразиться!",
-        keyboard=kb
+        keyboard=kb.get_json()
     )
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
 
@@ -2551,6 +2683,29 @@ async def filterlist_cmd(m: Message):
     for w in words:
         msg += f"-- {w}\n"
     await m.answer(msg.strip())
+
+
+# ────────────────────────────────────────────────
+# /clogs — скрытая команда управления chat logs
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/clogs", "/clogs <args>"])
+async def clogs_cmd(m: Message, args=None):
+    """Скрытая команда — только СР. Привязывает беседу-источник к clogs-беседе."""
+    if not await check_access(m, "Специальный Руководитель"): return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    if not args or not args.strip():
+        source = DATABASE["chats"][pid].get("clogs_source", "не установлен")
+        return await m.answer(
+            f"Тип текущей беседы: {DATABASE['chats'][pid].get('type', 'def')}\n"
+            f"Источник для clogs: {source}\n\n"
+            "Использование: /clogs [айди беседы]"
+        )
+    source_id = args.strip()
+    DATABASE["chats"][pid]["type"] = "clogs"
+    DATABASE["chats"][pid]["clogs_source"] = source_id
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    await m.answer(f"Режим clogs активирован. Логирую беседу: {source_id}")
 
 # ────────────────────────────────────────────────
 # Системные события
