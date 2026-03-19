@@ -82,8 +82,8 @@
                     "last": 1773919452.633554
                 },
                 "729733802": {
-                    "count": 7,
-                    "last": 1773920271.55968
+                    "count": 8,
+                    "last": 1773920279.576977
                 },
                 "666805850": {
                     "count": 3,
@@ -93,7 +93,7 @@
             "type": "pl",
             "invite_only": false,
             "quit_mode": false,
-            "filter_enabled": true,
+            "filter_enabled": false,
             "filter_words": []
         },
         "2000000039": {
