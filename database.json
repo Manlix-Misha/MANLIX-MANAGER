@@ -200,8 +200,8 @@
             "mutes": {},
             "stats": {
                 "778382713": {
-                    "count": 60,
-                    "last": 1773922886.69791
+                    "count": 63,
+                    "last": 1773922918.856058
                 },
                 "457884119": {
                     "count": 4,
@@ -227,6 +227,26 @@
             "staff": {},
             "mutes": {},
             "stats": {},
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
+        },
+        "2000000029": {
+            "title": "MANLIX | TEST BOT 2",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "798274800": {
+                    "count": 5,
+                    "last": 1773923049.608098
+                },
+                "870757778": {
+                    "count": 2,
+                    "last": 1773923059.41957
+                }
+            },
             "type": "def",
             "invite_only": false,
             "quit_mode": false,
