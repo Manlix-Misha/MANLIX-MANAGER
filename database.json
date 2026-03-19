@@ -44,12 +44,12 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 30,
-                    "last": 1773919700.335467
+                    "count": 31,
+                    "last": 1773919718.129095
                 },
                 "675783407": {
-                    "count": 24,
-                    "last": 1773919545.493044
+                    "count": 26,
+                    "last": 1773919725.990813
                 },
                 "778382713": {
                     "count": 17,
@@ -108,6 +108,26 @@
             "filter_enabled": false,
             "filter_words": [],
             "clogs_source": "2000000042"
+        },
+        "2000000037": {
+            "title": "JORDANS | Общение участников",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "778382713": {
+                    "count": 3,
+                    "last": 1773919747.239219
+                },
+                "870757778": {
+                    "count": 5,
+                    "last": 1773919795.227871
+                }
+            },
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
         }
     },
     "gstaff": {
