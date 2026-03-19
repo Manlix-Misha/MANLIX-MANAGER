@@ -1,5 +1,144 @@
 {
-    "chats": {},
-    "duels": {},
+    "chats": {
+        "2000000040": {
+            "title": "Чат 2000000040",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "657278822": {
+                    "count": 1,
+                    "last": 1773907035.926681
+                }
+            },
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
+        },
+        "2000000011": {
+            "title": "Чат 2000000011",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "691524752": {
+                    "count": 1,
+                    "last": 1773916925.599716
+                }
+            },
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
+        },
+        "2000000041": {
+            "title": "Чат 2000000041",
+            "staff": {
+                "870757778": [
+                    "Владелец",
+                    null,
+                    []
+                ]
+            },
+            "mutes": {},
+            "stats": {
+                "870757778": {
+                    "count": 4,
+                    "last": 1773918768.204007
+                }
+            },
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
+        }
+    },
+    "gstaff": {
+        "spec": 870757778,
+        "main_zam": null,
+        "zams": []
+    },
+    "duels": {
+        "2000000015_1772880142": {
+            "creator": "870757778",
+            "amount": 1000,
+            "participants": [
+                "870757778"
+            ],
+            "chat_id": "2000000015"
+        },
+        "2000000015_1772880249": {
+            "creator": "814386324",
+            "amount": 100,
+            "participants": [
+                "814386324"
+            ],
+            "chat_id": "2000000015"
+        },
+        "2000000018_1772934174": {
+            "creator": "675783407",
+            "amount": 140,
+            "participants": [
+                "675783407"
+            ],
+            "chat_id": "2000000018"
+        },
+        "2000000011_1773150511": {
+            "creator": "870757778",
+            "amount": 100,
+            "participants": [
+                "870757778"
+            ],
+            "chat_id": "2000000011"
+        },
+        "2000000020_1773151477": {
+            "creator": "778382713",
+            "amount": 500,
+            "participants": [
+                "778382713"
+            ],
+            "chat_id": "2000000020"
+        },
+        "2000000023_1773726399": {
+            "creator": "770181550",
+            "amount": 2942,
+            "participants": [
+                "770181550"
+            ],
+            "chat_id": "2000000023"
+        },
+        "2000000040_1773848879": {
+            "creator": "870757778",
+            "amount": 100,
+            "participants": [
+                "870757778"
+            ],
+            "chat_id": "2000000040"
+        }
+    },
+    "testers": {
+        "870757778": {
+            "role": "Тестировщик",
+            "bugs": 1,
+            "joined": 1772961427.7604296
+        },
+        "778382713": {
+            "role": "Главный Тестировщик",
+            "bugs": 1,
+            "joined": 1772974752.6275644
+        },
+        "637207999": {
+            "role": "Тестировщик",
+            "bugs": 0,
+            "joined": 1773081333.9819918
+        },
+        "770181550": {
+            "role": "Тестировщик",
+            "bugs": 0,
+            "joined": 1773084755.2254214
+        }
+    },
     "bot_status": "on"
 }
