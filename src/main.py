@@ -601,7 +601,9 @@ async def help_cmd(m: Message):
             "/gunrole -- Снятие глобальных уровней прав.\n"
             "/addowner -- Выдать права владельца.\n"
             "/gbanpl -- Блокировка пользователя во всех игровых Беседах.\n"
-            "/gunbanpl -- Снятие Блокировки во всех игровых Беседах.\n\n"
+            "/gunbanpl -- Снятие Блокировки во всех игровых Беседах.\n"
+            "/zban -- Блокировка пользователя во всех Беседах.\n"
+            "/zunban -- Снятие всех блокировок пользователя.\n\n"
             "Основной Зам. Спец. Руководителя:\n"
             "/addzsr -- Выдать права заместителя спец. руководителя.\n"
             "/thelp -- Список команд для тестировщиков.\n"
@@ -1751,6 +1753,71 @@ async def gunban(m: Message, args=None):
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] вынес [id{t}|{t_display}] из Глобальной Блокировки Бота.")
+
+
+# ────────────────────────────────────────────────
+# /zban / /zunban — глобальная блокировка во всех беседах
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/zban", "/zban <args>"])
+async def zban_cmd(m: Message, args=None):
+    if not await check_access(m, "Специальный Руководитель"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    if t == m.from_id:
+        return await m.answer("Невозможно заблокировать данного пользователя!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Невозможно заблокировать данного пользователя!")
+    reason  = parse_reason(args) or "Нарушение"
+    uid     = str(t)
+    # Добавляем в глобальный бан
+    PUNISHMENTS["gbans_status"][uid] = {
+        "admin":  m.from_id,
+        "reason": reason,
+        "date":   time.time()
+    }
+    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    # Исключаем из всех бесед
+    kicked = 0
+    for pid_c, chat in list(DATABASE.get("chats", {}).items()):
+        try:
+            chat_id = int(pid_c) - 2000000000
+            await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
+            kicked += 1
+        except:
+            pass
+    t_display = await get_display_name(t, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|Специальный Руководитель] заблокировал(-а) "
+        f"[id{t}|{t_display}] во всех Беседах."
+    )
+
+@bot.on.message(text=["/zunban", "/zunban <args>"])
+async def zunban_cmd(m: Message, args=None):
+    if not await check_access(m, "Специальный Руководитель"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    uid = str(t)
+    # Снимаем глобальный бан
+    if uid in PUNISHMENTS.get("gbans_status", {}):
+        del PUNISHMENTS["gbans_status"][uid]
+    # Снимаем игровой бан
+    if uid in PUNISHMENTS.get("gbans_pl", {}):
+        del PUNISHMENTS["gbans_pl"][uid]
+    # Снимаем все локальные баны во всех беседах
+    for pid_c in list(PUNISHMENTS.get("bans", {}).keys()):
+        if uid in PUNISHMENTS["bans"][pid_c]:
+            del PUNISHMENTS["bans"][pid_c][uid]
+    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|Специальный Руководитель] разблокировал(-а) "
+        f"[id{t}|{t_display}] во всех Беседах."
+    )
 
 # ────────────────────────────────────────────────
 # /gbanpl / /gunbanpl
