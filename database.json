@@ -456,11 +456,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 1,
-                    "last": 1773934373.621856
+                    "count": 2,
+                    "last": 1773934382.744249
                 }
             },
-            "type": "def",
+            "type": "logs",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
