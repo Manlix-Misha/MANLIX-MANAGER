@@ -344,6 +344,22 @@
             "quit_mode": false,
             "filter_enabled": false,
             "filter_words": []
+        },
+        "2000000048": {
+            "title": "Чат 2000000048",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "870757778": {
+                    "count": 1,
+                    "last": 1773923823.313087
+                }
+            },
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
         }
     },
     "gstaff": {
