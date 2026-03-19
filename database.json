@@ -44,8 +44,12 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 4,
-                    "last": 1773918768.204007
+                    "count": 8,
+                    "last": 1773919120.984607
+                },
+                "675783407": {
+                    "count": 3,
+                    "last": 1773919128.544119
                 }
             },
             "type": "def",
@@ -66,11 +70,31 @@
             "mutes": {},
             "stats": {
                 "870757778": {
+                    "count": 5,
+                    "last": 1773918976.848488
+                },
+                "729733802": {
                     "count": 3,
-                    "last": 1773918960.324731
+                    "last": 1773918990.941321
                 }
             },
             "type": "pl",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
+        },
+        "2000000039": {
+            "title": "Чат 2000000039",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "870757778": {
+                    "count": 1,
+                    "last": 1773919133.101288
+                }
+            },
+            "type": "def",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
