@@ -135,8 +135,8 @@
                     "last": 1773919452.633554
                 },
                 "729733802": {
-                    "count": 37,
-                    "last": 1773923789.155587
+                    "count": 38,
+                    "last": 1773923794.00857
                 },
                 "666805850": {
                     "count": 9,
@@ -316,6 +316,22 @@
                 }
             },
             "type": "pl",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
+        },
+        "2000000046": {
+            "title": "Чат 2000000046",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "870757778": {
+                    "count": 1,
+                    "last": 1773923803.583424
+                }
+            },
+            "type": "def",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
