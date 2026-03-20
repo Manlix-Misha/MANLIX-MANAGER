@@ -149,8 +149,8 @@
                     "last": 1773919452.633554
                 },
                 "729733802": {
-                    "count": 77,
-                    "last": 1773996172.421407
+                    "count": 78,
+                    "last": 1773998450.600537
                 },
                 "666805850": {
                     "count": 14,
@@ -223,8 +223,8 @@
             "mutes": {},
             "stats": {
                 "778382713": {
-                    "count": 260,
-                    "last": 1773998436.413685
+                    "count": 261,
+                    "last": 1773998440.005284
                 },
                 "870757778": {
                     "count": 97,
@@ -605,6 +605,22 @@
             "quit_mode": false,
             "filter_enabled": false,
             "filter_words": []
+        },
+        "2000000015": {
+            "title": "Чат 2000000015",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "870757778": {
+                    "count": 1,
+                    "last": 1773998895.329161
+                }
+            },
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
         }
     },
     "gstaff": {
@@ -692,5 +708,5 @@
             "joined": 1773084755.2254214
         }
     },
-    "bot_status": "on"
+    "bot_status": "off"
 }
