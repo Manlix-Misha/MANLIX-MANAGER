@@ -612,8 +612,8 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 1,
-                    "last": 1773998895.329161
+                    "count": 3,
+                    "last": 1773999197.296894
                 }
             },
             "type": "def",
@@ -628,11 +628,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 3,
-                    "last": 1773999149.186739
+                    "count": 1,
+                    "last": 1773999134.301895
                 }
             },
-            "type": "tex",
+            "type": "def",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
@@ -724,5 +724,5 @@
             "joined": 1773084755.2254214
         }
     },
-    "bot_status": "off"
+    "bot_status": "on"
 }
