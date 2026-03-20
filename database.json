@@ -488,15 +488,19 @@
                     "last": 1773924258.501015
                 },
                 "778382713": {
-                    "count": 1,
-                    "last": 1773924034.754932
+                    "count": 2,
+                    "last": 1773999294.318902
                 }
             },
             "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
-            "filter_words": []
+            "filter_words": [],
+            "server": {
+                "owner": 778382713,
+                "num": 5
+            }
         },
         "2000000048": {
             "title": "INFO | MODERATORS | JORDANS",
