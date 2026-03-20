@@ -552,15 +552,19 @@
                     "last": 1773924271.612571
                 },
                 "778382713": {
-                    "count": 1,
-                    "last": 1773924036.750966
+                    "count": 2,
+                    "last": 1773999300.91796
                 }
             },
             "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
-            "filter_words": []
+            "filter_words": [],
+            "server": {
+                "owner": 778382713,
+                "num": 5
+            }
         },
         "2000000049": {
             "title": "MANLIX MANAGER | Общее логирование",
