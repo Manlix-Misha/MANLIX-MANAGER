@@ -169,8 +169,8 @@
                     "last": 1774001473.284635
                 },
                 "624705678": {
-                    "count": 46,
-                    "last": 1774001480.457855
+                    "count": 47,
+                    "last": 1774001968.144476
                 }
             },
             "type": "pl",
@@ -420,8 +420,8 @@
             "mutes": {},
             "stats": {
                 "798274800": {
-                    "count": 61,
-                    "last": 1773948707.94213
+                    "count": 66,
+                    "last": 1774002194.69735
                 },
                 "870757778": {
                     "count": 26,
@@ -432,7 +432,11 @@
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
-            "filter_words": []
+            "filter_words": [],
+            "server": {
+                "owner": 798274800,
+                "num": 55
+            }
         },
         "2000000044": {
             "title": "Беседа Игроков | Sasha Eskov",
