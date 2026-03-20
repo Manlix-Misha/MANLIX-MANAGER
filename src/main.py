@@ -2583,15 +2583,23 @@ async def prise(m: Message):
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
     await m.answer(f"🎉Ты получил(-а) {win}$!")
 
-@bot.on.message(text="/balance")
-async def balance_cmd(m: Message):
-    uid   = str(m.from_id)
+@bot.on.message(text=["/balance", "/balance <args>"])
+async def balance_cmd(m: Message, args=None):
+    # Цель: reply > args > сам пользователь
+    t = None
+    if getattr(m, "reply_message", None):
+        t = m.reply_message.from_id
+    elif args:
+        t = await get_target_id(m, args)
+    if not t:
+        t = m.from_id
+    uid   = str(t)
     eco   = ECONOMY.get(uid, {})
     cash  = eco.get("cash", 0)
     bank  = eco.get("bank", 0)
     total = cash + bank
-    name  = await get_display_name(m.from_id, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"💰Общий баланс [id{m.from_id}|{name}]: {total}$")
+    name  = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
+    await m.answer(f"💰Общий баланс [id{t}|{name}]: {total}$")
 
 @bot.on.message(text="/bank")
 async def bank_cmd(m: Message):
