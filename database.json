@@ -223,8 +223,8 @@
             "mutes": {},
             "stats": {
                 "778382713": {
-                    "count": 261,
-                    "last": 1773998440.005284
+                    "count": 266,
+                    "last": 1773999290.147538
                 },
                 "870757778": {
                     "count": 97,
@@ -323,7 +323,11 @@
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
-            "filter_words": []
+            "filter_words": [],
+            "server": {
+                "owner": 778382713,
+                "num": 5
+            }
         },
         "2000000023": {
             "title": "Чат 2000000023",
