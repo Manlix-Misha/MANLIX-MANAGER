@@ -573,7 +573,9 @@ async def help_cmd(m: Message):
     if w >= 4:
         res += (
             "\n\nКоманды старших администраторов:\n"
-            "/addadmin -- Выдать права администратора."
+            "/addadmin -- выдать права администратора.\n"
+            "/skick -- исключить пользователя с сервера.\n"
+            "/sban -- заблокировать пользователя на сервере."
         )
     if w >= 5:
         res += (
@@ -588,9 +590,11 @@ async def help_cmd(m: Message):
     if w >= 7:
         res += (
             "\n\nКоманды владельца:\n"
-            "/addsa -- Выдать права специального администратора.\n"
-            "/invite -- Режим добавления только модерацией.\n"
-            "/filter -- включить/выключить фильтрацию запрещённых слов."
+            "/addsa -- выдать права специального администратора.\n"
+            "/invite -- режим добавления только модерацией.\n"
+            "/filter -- включить/выключить фильтрацию запрещённых слов.\n"
+            "/server -- привязать Беседу к серверу.\n"
+            "/serverinfo -- информация о сервере."
         )
     await m.answer(res)
     if w >= 8:
@@ -628,10 +632,10 @@ async def help_cmd(m: Message):
 async def info_cmd(m: Message):
     await m.answer(
         "Официальные ресурсы:\n\n"
-        "| Техническая поддержка \n"
-        "| MANLIX Беседы\n"
-        "| Активация Бота\n\n"
-        "(Команда на доработке)"
+        "| [https://vk.me/join/M/edYsiwM4wf2OCd81TrjVjyyVPDIDZBekI=|Техническая поддержка]\n"
+        "| [https://vk.ru/manlix_chats|MANLIX Беседы]\n"
+        "| Активация Бота\n"
+        "| [https://vk.com/id870757778|Специальный Руководитель]"
     )
 
 # ────────────────────────────────────────────────
@@ -665,12 +669,22 @@ async def stats_cmd(m: Message, args=None):
         if st["last"] else "Нет данных"
     )
     nick_display = nick if nick else "Не установлен"
-    # Показываем только одну наивысшую роль
-    all_local = get_all_local_roles(pid, uid)
-    if all_local:
-        roles_str = highest_role(all_local)
+    # Показываем наивысшую роль — глобальный ранг всегда приоритетнее локального.
+    # Все ID приводим к int для надёжного сравнения (JSON может вернуть str).
+    gstaff_s = STAFF.get("gstaff", {})
+    t_int = int(t)
+    spec_id    = int(gstaff_s["spec"])    if gstaff_s.get("spec")     is not None else None
+    main_zam_id= int(gstaff_s["main_zam"]) if gstaff_s.get("main_zam") is not None else None
+    zam_ids    = [int(z) for z in gstaff_s.get("zams", [])]
+    if t_int == 870757778 or (spec_id is not None and t_int == spec_id):
+        roles_str = "Специальный Руководитель"
+    elif main_zam_id is not None and t_int == main_zam_id:
+        roles_str = "Основной Зам. Спец. Руководителя"
+    elif t_int in zam_ids:
+        roles_str = "Зам. Спец. Руководителя"
     else:
-        roles_str = role
+        all_local = get_all_local_roles(pid, uid)
+        roles_str = highest_role(all_local) if all_local else "Пользователь"
     msg = (
         f"Информация о [id{t}|пользователе]\n"
         f"Роль: {roles_str}\n"
@@ -974,6 +988,11 @@ async def kick_cmd(m: Message, args=None):
     tgt_rank, _ = get_user_info(m.peer_id, t)
     if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
         return await m.answer("Невозможно исключить данного пользователя!")
+    # Извлекаем причину: при reply — весь args, при обычном — всё кроме цели
+    if getattr(m, "reply_message", None):
+        reason = (args or "").strip() or "Нарушение"
+    else:
+        reason = parse_reason(args) or "Нарушение"
     t_display = await get_display_name(t, peer_id=m.peer_id)
     try:
         chat_id = m.peer_id - 2000000000
@@ -982,7 +1001,7 @@ async def kick_cmd(m: Message, args=None):
         print("kick error:", e)
         return await m.answer(f"Не удалось исключить [id{t}|{t_display}]!")
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] исключил(-а) [id{t}|{t_display}] из Беседы.")
-    await send_log(m.peer_id, m.from_id, "Исключение", target_id=t)
+    await send_log(m.peer_id, m.from_id, "Исключение", reason=reason, target_id=t)
 
 # ────────────────────────────────────────────────
 # /ban
@@ -2184,12 +2203,13 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
     target_id  — VK ID цели действия
     mute_until — время окончания мута (только для Мута)
     """
-    mod_display = await get_display_name(moderator_id, peer_id=peer_id)
+    # use_nick=False — показываем имя ВК, не бот-ник
+    mod_display = await get_display_name(moderator_id, peer_id=peer_id, use_nick=False)
     chat_title  = DATABASE.get("chats", {}).get(str(peer_id), {}).get("title", f"Беседа {peer_id}")
     now         = datetime.datetime.now(TZ_MSK)
 
     if target_id:
-        tgt_display  = await get_display_name(target_id, peer_id=peer_id)
+        tgt_display  = await get_display_name(target_id, peer_id=peer_id, use_nick=False)
         target_line  = f"\n| Пользователь -- [id{target_id}|{tgt_display}]"
         vkid_target  = f"\n| VK ID пользователя: {target_id}"
     else:
@@ -2774,6 +2794,147 @@ async def clogs_cmd(m: Message, args=None):
     DATABASE["chats"][pid]["clogs_source"] = source_id
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer(f"Режим clogs активирован. Логирую беседу: {source_id}")
+
+
+# ────────────────────────────────────────────────
+# Система серверов
+# ────────────────────────────────────────────────
+def get_server_chats(owner_id: int, server_num: int) -> list:
+    """Возвращает список pid всех бесед, привязанных к серверу owner_id:server_num."""
+    result = []
+    for pid_c, chat in DATABASE.get("chats", {}).items():
+        srv = chat.get("server")
+        if srv and srv.get("owner") == owner_id and srv.get("num") == server_num:
+            result.append(pid_c)
+    return result
+
+def get_chat_server(pid: str):
+    """Возвращает (owner_id, server_num) беседы или (None, None)."""
+    srv = DATABASE.get("chats", {}).get(pid, {}).get("server")
+    if srv:
+        return srv.get("owner"), srv.get("num")
+    return None, None
+
+@bot.on.message(text=["/server", "/server <args>"])
+async def server_cmd(m: Message, args=None):
+    if not await check_access(m, "Владелец"): return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    if not args or not args.strip().isdigit():
+        current_owner, current_num = get_chat_server(pid)
+        if current_num is not None:
+            return await m.answer(
+                f"Беседа привязана к серверу « {current_num} »\n"
+                f"Использование: /server [1-100]"
+            )
+        return await m.answer("Беседа не привязана к серверу.\nИспользование: /server [1-100]")
+    num = int(args.strip())
+    if not (1 <= num <= 100):
+        return await m.answer("Номер сервера должен быть от 1 до 100.")
+    DATABASE["chats"][pid]["server"] = {"owner": m.from_id, "num": num}
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    await m.answer(f"Вы привязали свою Беседу к серверу: « {num} »")
+
+@bot.on.message(text="/serverinfo")
+async def serverinfo_cmd(m: Message):
+    if not await check_access(m, "Владелец"): return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    owner_id, server_num = get_chat_server(pid)
+    if owner_id is None:
+        return await m.answer(
+            "Эта Беседа не привязана к серверу.\n"
+            "Используйте /server [1-100] для привязки."
+        )
+    server_pids = get_server_chats(owner_id, server_num)
+    owner_display = await get_display_name(owner_id, peer_id=m.peer_id)
+    chats_list = ""
+    for sp in server_pids:
+        title = DATABASE["chats"].get(sp, {}).get("title", f"Беседа {sp}")
+        chats_list += f"\n– {title}"
+    await m.answer(
+        f"Информация о сервере:\n\n"
+        f"| Владелец -- [id{owner_id}|{owner_display}]\n"
+        f"| Номер сервера -- « {server_num} »\n"
+        f"| Кол-во Бесед -- « {len(server_pids)} »\n"
+        f"\nСписок Бесед сервера:{chats_list}"
+    )
+
+@bot.on.message(text=["/skick", "/skick <args>"])
+async def skick_cmd(m: Message, args=None):
+    if not await check_access(m, "Старший Администратор"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    if t == m.from_id:
+        return await m.answer("Невозможно исключить данного пользователя!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Невозможно исключить данного пользователя!")
+    pid = str(m.peer_id)
+    owner_id, server_num = get_chat_server(pid)
+    if owner_id is None:
+        return await m.answer(
+            "Эта Беседа не привязана к серверу.\n"
+            "Используйте /server [1-100] для привязки."
+        )
+    server_pids = get_server_chats(owner_id, server_num)
+    kicked = 0
+    for sp in server_pids:
+        try:
+            chat_id = int(sp) - 2000000000
+            await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
+            kicked += 1
+        except:
+            pass
+    t_display = await get_display_name(t, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|Модератор MANLIX] исключил(-а) "
+        f"[id{t}|{t_display}] в Беседах сервера."
+    )
+
+@bot.on.message(text=["/sban", "/sban <args>"])
+async def sban_cmd(m: Message, args=None):
+    if not await check_access(m, "Старший Администратор"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    if t == m.from_id:
+        return await m.answer("Невозможно заблокировать данного пользователя!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Невозможно заблокировать данного пользователя!")
+    pid = str(m.peer_id)
+    owner_id, server_num = get_chat_server(pid)
+    if owner_id is None:
+        return await m.answer(
+            "Эта Беседа не привязана к серверу.\n"
+            "Используйте /server [1-100] для привязки."
+        )
+    server_pids = get_server_chats(owner_id, server_num)
+    uid = str(t)
+    for sp in server_pids:
+        if sp not in PUNISHMENTS["bans"]:
+            PUNISHMENTS["bans"][sp] = {}
+        PUNISHMENTS["bans"][sp][uid] = {
+            "admin":  m.from_id,
+            "reason": "Блокировка сервера",
+            "date":   time.time()
+        }
+        # Исключаем из беседы
+        try:
+            chat_id = int(sp) - 2000000000
+            await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
+        except:
+            pass
+    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) "
+        f"[id{t}|{t_display}] в Беседах сервера."
+    )
 
 # ────────────────────────────────────────────────
 # Системные события
