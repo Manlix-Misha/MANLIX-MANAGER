@@ -520,15 +520,19 @@
                     "last": 1773924318.773612
                 },
                 "778382713": {
-                    "count": 6,
-                    "last": 1773924478.833208
+                    "count": 7,
+                    "last": 1773999298.852523
                 }
             },
             "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
-            "filter_words": []
+            "filter_words": [],
+            "server": {
+                "owner": 778382713,
+                "num": 5
+            }
         },
         "2000000047": {
             "title": "FLOOD | MODERATORS | JORDANS",
