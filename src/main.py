@@ -575,7 +575,8 @@ async def help_cmd(m: Message):
             "\n\nКоманды старших администраторов:\n"
             "/addadmin -- выдать права администратора.\n"
             "/skick -- исключить пользователя с сервера.\n"
-            "/sban -- заблокировать пользователя на сервере."
+            "/sban -- заблокировать пользователя на сервере.\n"
+            "/sunban -- снятие Блокировки пользователю на сервере."
         )
     if w >= 5:
         res += (
@@ -2880,15 +2881,20 @@ async def skick_cmd(m: Message, args=None):
             "Используйте /server [1-100] для привязки."
         )
     server_pids = get_server_chats(owner_id, server_num)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
+    if not server_pids:
+        return await m.answer("На сервере нет привязанных Бесед.")
     kicked = 0
+    failed = 0
     for sp in server_pids:
         try:
             chat_id = int(sp) - 2000000000
             await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
             kicked += 1
         except:
-            pass
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+            failed += 1
+    if kicked == 0:
+        return await m.answer(f"Пользователя не удалось исключить [id{t}|{t_display}]!")
     await m.answer(
         f"[id{m.from_id}|Модератор MANLIX] исключил(-а) "
         f"[id{t}|{t_display}] в Беседах сервера."
@@ -2934,6 +2940,32 @@ async def sban_cmd(m: Message, args=None):
     await m.answer(
         f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) "
         f"[id{t}|{t_display}] в Беседах сервера."
+    )
+
+
+@bot.on.message(text=["/sunban", "/sunban <args>"])
+async def sunban_cmd(m: Message, args=None):
+    if not await check_access(m, "Старший Администратор"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    pid = str(m.peer_id)
+    owner_id, server_num = get_chat_server(pid)
+    if owner_id is None:
+        return await m.answer(
+            "Эта Беседа не привязана к серверу.\n"
+            "Используйте /server [1-100] для привязки."
+        )
+    server_pids = get_server_chats(owner_id, server_num)
+    uid = str(t)
+    for sp in server_pids:
+        if sp in PUNISHMENTS.get("bans", {}) and uid in PUNISHMENTS["bans"][sp]:
+            del PUNISHMENTS["bans"][sp][uid]
+    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|Модератор MANLIX] разблокировал(-а) "
+        f"[id{t}|{t_display}] во всех Беседах сервера."
     )
 
 # ────────────────────────────────────────────────
