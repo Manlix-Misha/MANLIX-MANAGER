@@ -780,11 +780,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 1,
-                    "last": 1774017909.023297
+                    "count": 2,
+                    "last": 1774017912.601159
                 }
             },
-            "type": "def",
+            "type": "add",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
