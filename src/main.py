@@ -553,7 +553,8 @@ async def help_cmd(m: Message):
             "/nlist -- Список пользователей с ником.\n"
             "/getban -- Информация о Блокировках.\n"
             "/warn -- Выдать предупреждение.\n"
-            "/unwarn -- Снять предупреждение."
+            "/unwarn -- снять предупреждение.\n"
+            "/clear -- очистить сообщение."
         )
     if w >= 2:
         res += (
@@ -1125,6 +1126,59 @@ async def unwarn_cmd(m: Message, args=None):
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) предупреждение [id{t}|пользователю]")
+
+
+# ────────────────────────────────────────────────
+# /clear
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/clear", "/clear <args>"])
+async def clear_cmd(m: Message, args=None):
+    if not await check_access(m, "Модератор"): return
+    # Определяем цель — приоритет: reply, потом args
+    t = None
+    target_cmid = None
+    if getattr(m, "reply_message", None):
+        t         = m.reply_message.from_id
+        target_cmid = m.reply_message.conversation_message_id
+    else:
+        t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Ответьте на сообщение пользователя или укажите его.")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Невозможно очистить сообщения данного пользователя!")
+    # Удаляем конкретное сообщение (если reply) или последние 50
+    if target_cmid:
+        try:
+            await bot.api.messages.delete(
+                peer_id=m.peer_id,
+                conversation_message_ids=[target_cmid],
+                delete_for_all=True
+            )
+        except Exception as e:
+            print("clear reply error:", e)
+    else:
+        try:
+            history = await bot.api.messages.get_history(
+                peer_id=m.peer_id,
+                count=50,
+                user_id=t
+            )
+            ids = [msg.id for msg in history.items if msg.from_id == t]
+            if ids:
+                await bot.api.messages.delete(
+                    peer_id=m.peer_id,
+                    message_ids=ids,
+                    delete_for_all=True
+                )
+        except Exception as e:
+            print("clear history error:", e)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|{a_display}] очистил(-а) сообщения [id{t}|{t_display}]"
+    )
 
 # ────────────────────────────────────────────────
 # Выдача ролей
@@ -2536,7 +2590,7 @@ async def balance_cmd(m: Message):
     cash  = eco.get("cash", 0)
     bank  = eco.get("bank", 0)
     total = cash + bank
-    name  = await get_display_name(m.from_id, peer_id=m.peer_id)
+    name  = await get_display_name(m.from_id, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"💰Общий баланс [id{m.from_id}|{name}]: {total}$")
 
 @bot.on.message(text="/bank")
