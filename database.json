@@ -799,6 +799,22 @@
             "quit_mode": false,
             "filter_enabled": false,
             "filter_words": []
+        },
+        "2000000051": {
+            "title": "MANLIX MANAGER | Мини-игры 1",
+            "staff": {},
+            "mutes": {},
+            "stats": {
+                "870757778": {
+                    "count": 2,
+                    "last": 1774019257.629813
+                }
+            },
+            "type": "def",
+            "invite_only": false,
+            "quit_mode": false,
+            "filter_enabled": false,
+            "filter_words": []
         }
     },
     "gstaff": {
