@@ -806,11 +806,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 2,
-                    "last": 1774019257.629813
+                    "count": 3,
+                    "last": 1774019260.409305
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
