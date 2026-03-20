@@ -812,15 +812,19 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 4,
-                    "last": 1774019264.720272
+                    "count": 5,
+                    "last": 1774019286.282404
                 }
             },
             "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
-            "filter_words": []
+            "filter_words": [],
+            "server": {
+                "owner": 870757778,
+                "num": 1
+            }
         }
     },
     "gstaff": {
