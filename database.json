@@ -628,11 +628,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 1,
-                    "last": 1773999134.301895
+                    "count": 3,
+                    "last": 1773999149.186739
                 }
             },
-            "type": "def",
+            "type": "tex",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
