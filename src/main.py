@@ -582,7 +582,8 @@ async def help_cmd(m: Message):
             "/skick -- исключить пользователя с сервера.\n"
             "/sban -- заблокировать пользователя на сервере.\n"
             "/sunban -- снятие Блокировки пользователю на сервере.\n"
-            "/srole -- выдать роль во всех Беседах сервера."
+            "/srole -- выдать уровень прав на сервере.\n"
+            "/sunrole -- забрать уровень прав на сервере."
         )
     if w >= 5:
         res += (
@@ -3078,6 +3079,38 @@ async def srole_cmd(m: Message, args=None):
     await m.answer(
         f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} "
         f"[id{t}|пользователю] во всех Беседах сервера."
+    )
+
+
+@bot.on.message(text=["/sunrole", "/sunrole <args>"])
+async def sunrole_cmd(m: Message, args=None):
+    if not await check_access(m, "Администратор"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer("Укажите пользователя!")
+    if t == m.from_id:
+        return await m.answer("Вы не можете снять роль у самого себя!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Вы не можете снять роль у данного пользователя!")
+    pid = str(m.peer_id)
+    owner_id, server_num = get_chat_server(pid)
+    if owner_id is None:
+        return await m.answer(
+            "Эта Беседа не привязана к серверу.\n"
+            "Используйте /server [1-100] для привязки."
+        )
+    server_pids = get_server_chats(owner_id, server_num)
+    uid = str(t)
+    for sp in server_pids:
+        if uid in DATABASE.get("chats", {}).get(sp, {}).get("staff", {}):
+            del DATABASE["chats"][sp]["staff"][uid]
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|{a_display}] забрал уровень прав "
+        f"[id{t}|пользователя] во всех Беседах сервера."
     )
 
 @bot.on.message(text=["/sunban", "/sunban <args>"])
