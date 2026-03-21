@@ -8,8 +8,8 @@
         "transfers_out": 100
     },
     "778382713": {
-        "cash": 542,
-        "bank": 0,
+        "cash": 0,
+        "bank": 542,
         "last": 1774096762.9098074,
         "duel_wins": 100,
         "duel_losses": 113
