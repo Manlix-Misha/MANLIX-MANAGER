@@ -358,21 +358,25 @@ def highest_role(roles: list) -> str:
         return "Пользователь"
     return max(roles, key=lambda r: RANK_WEIGHT.get(r, 0))
 
-async def set_role_in_chat(pid: str, uid: str, role_name: str):
-    """Добавляет роль пользователю (накапливает, не перезаписывает)."""
+async def set_role_in_chat(pid: str, uid: str, role_name: str, replace: bool = False):
+    """
+    Выдаёт роль пользователю.
+    replace=True  — заменяет все прежние роли (для обычных выдающих).
+    replace=False — накапливает роли (только для СР, rank>=10).
+    """
     ensure_chat(pid)
     entry = DATABASE["chats"][pid]["staff"].get(uid)
-    if entry:
-        nick = entry[1]
-        existing = get_all_local_roles(pid, uid)
+    nick  = entry[1] if entry else None
+    if replace:
+        # Просто заменяем — одна роль
+        DATABASE["chats"][pid]["staff"][uid] = [role_name, nick, []]
     else:
-        nick = None
-        existing = []
-    if role_name not in existing:
-        existing.append(role_name)
-    top  = highest_role(existing)
-    rest = [r for r in existing if r != top]
-    DATABASE["chats"][pid]["staff"][uid] = [top, nick, rest]
+        existing = get_all_local_roles(pid, uid) if entry else []
+        if role_name not in existing:
+            existing.append(role_name)
+        top  = highest_role(existing)
+        rest = [r for r in existing if r != top]
+        DATABASE["chats"][pid]["staff"][uid] = [top, nick, rest]
 
 # ────────────────────────────────────────────────
 # Middleware
@@ -577,7 +581,8 @@ async def help_cmd(m: Message):
             "/addadmin -- выдать права администратора.\n"
             "/skick -- исключить пользователя с сервера.\n"
             "/sban -- заблокировать пользователя на сервере.\n"
-            "/sunban -- снятие Блокировки пользователю на сервере."
+            "/sunban -- снятие Блокировки пользователю на сервере.\n"
+            "/srole -- выдать роль во всех Беседах сервера."
         )
     if w >= 5:
         res += (
@@ -1175,9 +1180,9 @@ async def clear_cmd(m: Message, args=None):
         except Exception as e:
             print("clear history error:", e)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(
-        f"[id{m.from_id}|{a_display}] очистил(-а) сообщения [id{t}|{t_display}]"
+        f"[id{m.from_id}|{a_display}] очистил(-а) сообщение [id{t}|{t_display}]"
     )
 
 # ────────────────────────────────────────────────
@@ -1197,7 +1202,9 @@ async def role_grant(m: Message, args, min_rank, role_name, role_label):
     if t != m.from_id and RANK_WEIGHT.get(tgt_rank, 0) >= my_w:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
     pid, uid  = str(m.peer_id), str(t)
-    await set_role_in_chat(pid, uid, role_name)
+    # СР (rank>=10) может накапливать роли, остальные — заменяют
+    is_spec   = my_w >= 10
+    await set_role_in_chat(pid, uid, role_name, replace=not is_spec)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|пользователю]")
@@ -1460,7 +1467,7 @@ async def setnick(m: Message, args=None):
     DATABASE["chats"][pid]["staff"][uid] = [local_role, new_nick, extra_roles]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
-    await send_log(m.peer_id, m.from_id, "Выдача ника", target_id=t)
+    await send_log(m.peer_id, m.from_id, "Выдача ника", target_id=t, new_nick=new_nick)
 
 # ────────────────────────────────────────────────
 # /rnick
@@ -1514,7 +1521,8 @@ async def nick_list(m: Message):
         return await m.answer("Никнеймы не установлены.")
     msg = "Список пользователей с ником:\n"
     for i, (u, n) in enumerate(users, 1):
-        msg += f"{i}. [id{u}|{n}]\n"
+        vk_name = await get_display_name(int(u), peer_id=m.peer_id, use_nick=False)
+        msg += f"  {i}. [id{u}|{vk_name}]\nNICK: {n}\n"
     await m.answer(msg.strip())
 
 # ────────────────────────────────────────────────
@@ -2251,7 +2259,8 @@ async def removetester_cmd(m: Message, args=None):
 # Система логов (тип беседы: logs)
 # ────────────────────────────────────────────────
 async def send_log(peer_id: int, moderator_id: int, action: str,
-                   reason: str = "", target_id: int = None, mute_until: str = ""):
+                   reason: str = "", target_id: int = None, mute_until: str = "",
+                   new_nick: str = ""):
     """
     Отправляет лог во все беседы типа 'logs'.
     reason     — причина наказания
@@ -2278,7 +2287,7 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
         f"| Беседа -- {chat_title}\n"
         f"| CHAT ID -- {peer_id}\n"
         f"| Действие -- {action}\n"
-        f"| Причина наказания: {reason or '—'}"
+        f"| {('Новое имя: ' + new_nick) if new_nick else ('Причина наказания: ' + (reason or '—'))}"
         f"\n\n| Модератор -- [id{moderator_id}|{mod_display}]"
         f"{target_line}"
         f"\n| VK ID модератора: {moderator_id}"
@@ -2981,6 +2990,7 @@ async def sban_cmd(m: Message, args=None):
             "Эта Беседа не привязана к серверу.\n"
             "Используйте /server [1-100] для привязки."
         )
+    reason  = parse_reason(args) or "Нарушение"
     server_pids = get_server_chats(owner_id, server_num)
     uid = str(t)
     for sp in server_pids:
@@ -2988,7 +2998,7 @@ async def sban_cmd(m: Message, args=None):
             PUNISHMENTS["bans"][sp] = {}
         PUNISHMENTS["bans"][sp][uid] = {
             "admin":  m.from_id,
-            "reason": "Блокировка сервера",
+            "reason": reason,
             "date":   time.time()
         }
         # Исключаем из беседы
@@ -3004,6 +3014,71 @@ async def sban_cmd(m: Message, args=None):
         f"[id{t}|{t_display}] в Беседах сервера."
     )
 
+
+
+# ────────────────────────────────────────────────
+# /srole — выдача роли во всех беседах сервера
+# ────────────────────────────────────────────────
+SROLE_MAP = {
+    1: ("Модератор",                 "модератора"),
+    2: ("Старший Модератор",         "старшего модератора"),
+    3: ("Администратор",             "администратора"),
+    4: ("Старший Администратор",     "старшего администратора"),
+    5: ("Зам. Спец. Администратора", "заместителя специального администратора"),
+    6: ("Спец. Администратор",       "специального администратора"),
+}
+
+@bot.on.message(text=["/srole", "/srole <args>"])
+async def srole_cmd(m: Message, args=None):
+    if not await check_access(m, "Администратор"): return
+    t = await get_target_id(m, args)
+    if not t:
+        return await m.answer(
+            "Использование: /srole [ссылка/упоминание] [1-6]\n\n"
+            "1 — Модератор\n"
+            "2 — Старший Модератор\n"
+            "3 — Администратор\n"
+            "4 — Старший Администратор\n"
+            "5 — Зам. Спец. Администратора\n"
+            "6 — Спец. Администратор"
+        )
+    if t == m.from_id:
+        return await m.answer("Вы не можете выдать роль данному пользователю!")
+    my_rank, _  = get_user_info(m.peer_id, m.from_id)
+    tgt_rank, _ = get_user_info(m.peer_id, t)
+    if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
+        return await m.answer("Вы не можете выдать роль данному пользователю!")
+    pid = str(m.peer_id)
+    owner_id, server_num = get_chat_server(pid)
+    if owner_id is None:
+        return await m.answer(
+            "Эта Беседа не привязана к серверу.\n"
+            "Используйте /server [1-100] для привязки."
+        )
+    # Парсим номер роли из args (последний числовой токен)
+    role_num = None
+    if args:
+        tokens = args.split()
+        for tk in reversed(tokens):
+            if tk.isdigit() and 1 <= int(tk) <= 6:
+                role_num = int(tk)
+                break
+    if role_num is None:
+        return await m.answer(
+            "Укажите номер роли от 1 до 6.\n"
+            "Пример: /srole [ссылка] 3"
+        )
+    role_name, role_label = SROLE_MAP[role_num]
+    server_pids = get_server_chats(owner_id, server_num)
+    uid = str(t)
+    for sp in server_pids:
+        await set_role_in_chat(sp, uid, role_name, replace=True)
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} "
+        f"[id{t}|пользователю] во всех Беседах сервера."
+    )
 
 @bot.on.message(text=["/sunban", "/sunban <args>"])
 async def sunban_cmd(m: Message, args=None):
