@@ -8,10 +8,10 @@
         "transfers_out": 200
     },
     "778382713": {
-        "cash": 139,
+        "cash": 189,
         "bank": 542,
         "last": 1774162520.148023,
-        "duel_wins": 100,
+        "duel_wins": 150,
         "duel_losses": 113
     },
     "457884119": {
@@ -20,10 +20,10 @@
         "last": 1774062401.6316283
     },
     "770181550": {
-        "cash": 612,
+        "cash": 562,
         "bank": 0,
         "last": 1774162580.6117754,
-        "duel_losses": 199,
+        "duel_losses": 249,
         "transfers_in": 100,
         "duel_wins": 383
     },
