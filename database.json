@@ -346,8 +346,8 @@
                     "last": 1773996698.570123
                 },
                 "875639260": {
-                    "count": 298,
-                    "last": 1774168602.345405
+                    "count": 299,
+                    "last": 1774168610.073742
                 },
                 "614324339": {
                     "count": 7,
@@ -1287,11 +1287,11 @@
             "mutes": {},
             "stats": {
                 "870757778": {
-                    "count": 2,
-                    "last": 1774168605.889125
+                    "count": 3,
+                    "last": 1774168612.725593
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
