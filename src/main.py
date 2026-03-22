@@ -1872,7 +1872,7 @@ async def msg_cmd(m: Message, args=None):
 # ────────────────────────────────────────────────
 @bot.on.message(text=["/gban", "/gban <args>"])
 async def gban_cmd(m: Message, args=None):
-    if not await check_access(m, "Специальный Руководитель"): return
+    if not await check_access(m, "Зам. Спец. Руководителя"): return
     t = await get_target_id(m, args)
     if not t:
         return await m.answer("Укажите пользователя!")
@@ -1887,7 +1887,8 @@ async def gban_cmd(m: Message, args=None):
     PUNISHMENTS["gbans_status"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] занес [id{t}|{t_display}] в глобальную Блокировку Бота.")
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(f"[id{m.from_id}|{a_display}] занес [id{t}|{t_display}] в глобальную Блокировку Бота.")
 
 @bot.on.message(text=["/gunban", "/gunban <args>"])
 async def gunban(m: Message, args=None):
