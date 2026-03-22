@@ -62,6 +62,11 @@ TEX_RANK_WEIGHT = {
 }
 
 # ────────────────────────────────────────────────
+# Кэш имён пользователей — избегаем лишних API вызовов
+# ────────────────────────────────────────────────
+USER_NAMES_CACHE: dict = {}  # {user_id: "Имя Фамилия"}
+
+# ────────────────────────────────────────────────
 # HTTP-сервер
 # ────────────────────────────────────────────────
 class H(BaseHTTPRequestHandler):
@@ -317,40 +322,82 @@ def get_user_info(peer_id, user_id):
 
 async def get_display_name(user_id: int, peer_id=None, use_nick=True):
     """
-    Возвращает отображаемое имя пользователя:
-    1. Ник из бота (если установлен через /setnick и use_nick=True)
-    2. Имя + фамилия из VK API (правильный вызов: int напрямую)
-    3. Ник из бота как резерв (даже при use_nick=False, если API упал)
-    4. Fallback: "id{user_id}" — всегда создаёт рабочую VK-ссылку
+    Возвращает отображаемое имя пользователя.
+    Приоритет:
+    1. Ник из бота (/setnick), если use_nick=True
+    2. Кэш имён
+    3. bot.api.request("users.get") — низкоуровневый надёжный вызов
+    4. bot.api.users.get() — обёртка vkbottle
+    5. messages.getConversationMembers — если есть peer_id
+    6. Ник из бота как резерв
+    7. Fallback: "id{user_id}" — всегда рабочая ссылка
     """
-    # Сохраняем ник заранее — пригодится как резерв
-    nick = None
-    if peer_id:
-        _, nick = get_user_info(peer_id, user_id)
+    uid = int(user_id)
 
     # 1. Ник из бота (если разрешён)
+    nick = None
+    if peer_id:
+        _, nick = get_user_info(peer_id, uid)
     if use_nick and nick:
         return nick
 
-    # 2. Имя из VK API
-    # ВАЖНО: vkbottle users.get принимает int напрямую, НЕ list и НЕ str
+    # 2. Кэш
+    if uid in USER_NAMES_CACHE:
+        return USER_NAMES_CACHE[uid]
+
+    # 3. Низкоуровневый вызов VK API — самый надёжный способ
     try:
-        uinfo = await bot.api.users.get(int(user_id))
-        if uinfo and len(uinfo) > 0:
-            first = uinfo[0].first_name or ""
-            last  = uinfo[0].last_name  or ""
+        resp = await bot.api.request("users.get", {"user_ids": uid})
+        users = resp.get("response", []) if isinstance(resp, dict) else []
+        if users:
+            first = users[0].get("first_name", "") or ""
+            last  = users[0].get("last_name",  "") or ""
             name  = f"{first} {last}".strip()
             if name:
+                USER_NAMES_CACHE[uid] = name
                 return name
     except Exception as e:
-        print(f"[get_display_name] VK API error for {user_id}: {e}")
+        print(f"[display_name] raw error uid={uid} {type(e).__name__}: {e}")
 
-    # 3. Ник из бота как резерв (лучше ник чем цифры)
+    # 4. Стандартный вызов vkbottle users.get
+    try:
+        uinfo = await bot.api.users.get(user_ids=[uid])
+        if uinfo:
+            first = getattr(uinfo[0], "first_name", "") or ""
+            last  = getattr(uinfo[0], "last_name",  "") or ""
+            name  = f"{first} {last}".strip()
+            if name:
+                USER_NAMES_CACHE[uid] = name
+                return name
+    except Exception as e:
+        print(f"[display_name] wrapper error uid={uid} {type(e).__name__}: {e}")
+
+    # 5. messages.getConversationMembers — берём из участников беседы
+    if peer_id:
+        try:
+            resp2 = await bot.api.request(
+                "messages.getConversationMembers",
+                {"peer_id": int(peer_id)}
+            )
+            profiles = resp2.get("response", {}).get("profiles", []) if isinstance(resp2, dict) else []
+            for p in profiles:
+                pid_u = p.get("id")
+                fn = p.get("first_name", "") or ""
+                ln = p.get("last_name", "")  or ""
+                full = f"{fn} {ln}".strip()
+                if full and pid_u:
+                    USER_NAMES_CACHE[int(pid_u)] = full
+            if uid in USER_NAMES_CACHE:
+                return USER_NAMES_CACHE[uid]
+        except Exception as e:
+            print(f"[display_name] members error uid={uid} {type(e).__name__}: {e}")
+
+    # 6. Ник из бота как резерв
     if nick:
         return nick
 
-    # 4. Последний резерв — рабочая ссылка вида [id123|id123]
-    return f"id{user_id}"
+    # 7. Последний резерв
+    return f"id{uid}"
 
 async def check_access(m: Message, min_rank: str):
     rank, _ = get_user_info(m.peer_id, m.from_id)
@@ -433,6 +480,22 @@ class ChatMiddleware(BaseMiddleware[Message]):
             chat["stats"][uid] = {"count": 0, "last": 0}
         chat["stats"][uid]["count"] += 1
         chat["stats"][uid]["last"]   = datetime.datetime.now(TZ_MSK).timestamp()
+
+        # Прогрев кэша имён — используем сведения из самого события
+        # Иногда vkbottle передаёт full_name в extended message info
+        if from_id > 0 and from_id not in USER_NAMES_CACHE:
+            # Пробуем получить имя из API при первом сообщении пользователя
+            try:
+                resp = await bot.api.request("users.get", {"user_ids": from_id})
+                users = resp.get("response", []) if isinstance(resp, dict) else []
+                if users:
+                    fn = users[0].get("first_name", "") or ""
+                    ln = users[0].get("last_name",  "") or ""
+                    name = f"{fn} {ln}".strip()
+                    if name:
+                        USER_NAMES_CACHE[from_id] = name
+            except:
+                pass
         if chat["stats"][uid]["count"] % 10 == 0:
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
         is_gban   = uid in PUNISHMENTS.get("gbans_status", {})
@@ -832,11 +895,7 @@ async def all_buttons(event: MessageEvent):
             if uid in DATABASE["chats"][pid].get("mutes", {}):
                 del DATABASE["chats"][pid]["mutes"][uid]
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            try:
-                u_info = await bot.api.users.get(int(uid))
-                u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
-            except:
-                u_name = "пользователю"
+            u_name = await get_display_name(int(uid), peer_id=peer_id, use_nick=False)
             new_text = f"[id{actor_id}|Модератор MANLIX] снял(-а) мут [id{uid}|{u_name}]"
             try:
                 await bot.api.request("messages.edit", {
@@ -865,11 +924,7 @@ async def all_buttons(event: MessageEvent):
                     )
             except Exception as e:
                 print("clear_msg error:", e)
-            try:
-                u_info2 = await bot.api.users.get(int(uid))
-                u_name2 = f"{u_info2[0].first_name} {u_info2[0].last_name}"
-            except:
-                u_name2 = "пользователя"
+            u_name2 = await get_display_name(int(uid), peer_id=peer_id, use_nick=False)
             new_text = f"[id{actor_id}|Модератор MANLIX] очистил(-а) сообщения [id{uid}|{u_name2}]"
             try:
                 await bot.api.request("messages.edit", {
@@ -922,16 +977,12 @@ async def all_buttons(event: MessageEvent):
             else:
                 del warns[uid]
             await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-        try:
-            u_info = await bot.api.users.get(int(uid))
-            u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
-        except:
-            u_name = "пользователю"
+        u_name = await get_display_name(int(uid), peer_id=peer_id, use_nick=False)
         try:
             await bot.api.request("messages.edit", {
                 "peer_id": peer_id,
                 "conversation_message_id": cmid,
-                "message": f"[id{actor_id}|Модератор MANLIX] снял(-а) предупреждение [id{uid}|пользователю]",
+                "message": f"[id{actor_id}|Модератор MANLIX] снял(-а) предупреждение [id{uid}|{u_name}]",
                 "keyboard": EMPTY_KB_JSON
             })
         except Exception as e:
@@ -969,16 +1020,8 @@ async def all_buttons(event: MessageEvent):
             await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
             del DATABASE["duels"][duel_id]
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            try:
-                w_info = await bot.api.users.get(int(winner))
-                w_name = f"{w_info[0].first_name} {w_info[0].last_name}"
-            except:
-                w_name = "победитель"
-            try:
-                l_info = await bot.api.users.get(int(loser))
-                l_name = f"{l_info[0].first_name} {l_info[0].last_name}"
-            except:
-                l_name = "проигравший"
+            w_name = await get_display_name(int(winner), use_nick=False)
+            l_name = await get_display_name(int(loser), use_nick=False)
             duel_result = (
                 f"⚔️ Дуэль завершена!\n"
                 f"🏅 Победил – [id{winner}|{w_name}]\n"
@@ -1431,11 +1474,7 @@ async def staff_view(m: Message):
                 if nick:
                     display = nick
                 else:
-                    try:
-                        uinfo   = await bot.api.users.get(int(u))
-                        display = f"{uinfo[0].first_name} {uinfo[0].last_name}"
-                    except:
-                        display = f"id{u}"
+                    display = await get_display_name(int(u), peer_id=m.peer_id, use_nick=False)
                 members.append(f"– [id{u}|{display}]")
         if r == "Владелец":
             owner_ids = []
@@ -1571,13 +1610,8 @@ async def getban_cmd(m: Message, args=None):
     if not t:
         return await m.answer("Укажите пользователя.")
     uid = str(t)
-    try:
-        uinfo = await bot.api.users.get(int(t))
-        name  = f"{uinfo[0].first_name} {uinfo[0].last_name}"
-    except:
-        name = "пользователь"
-
-    ans = f"Информация о блокировках [id{t}|пользователя]\n"
+    name = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
+    ans = f"Информация о блокировках [id{t}|{name}]\n"
 
     if uid in PUNISHMENTS.get("gbans_status", {}):
         b  = PUNISHMENTS["gbans_status"][uid]
@@ -2687,21 +2721,30 @@ async def snyat(m: Message, amount=None):
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
     await m.answer(f"💲Вы сняли со своего счета {amount}$")
 
-@bot.on.message(text=["/перевести <args>"])
+@bot.on.message(text=["/перевести", "/перевести <args>"])
 async def transfer(m: Message, args=None):
-    if not args:
-        return await m.answer("Формат: /перевести [ссылка] [сумма]")
-    parts = args.split()
-    if len(parts) < 2:
-        return await m.answer("Формат: /перевести [ссылка] [сумма]")
-    t = await get_target_id(m, parts[0])
-    if not t:
-        return await m.answer("Не удалось определить получателя.")
-    try:
-        amount = int(parts[1])
-        if amount <= 0: raise ValueError
-    except:
-        return await m.answer("Некорректная сумма.")
+    # Поддержка ответа на сообщение: /перевести [сумма]
+    if getattr(m, "reply_message", None):
+        t = m.reply_message.from_id
+        try:
+            amount = int((args or "").strip())
+            if amount <= 0: raise ValueError
+        except:
+            return await m.answer("Укажите сумму. Пример: /перевести 100")
+    else:
+        if not args:
+            return await m.answer("Формат: /перевести [ссылка] [сумма]\nИли ответом на сообщение: /перевести [сумма]")
+        parts = args.split()
+        if len(parts) < 2:
+            return await m.answer("Формат: /перевести [ссылка] [сумма]")
+        t = await get_target_id(m, parts[0])
+        if not t:
+            return await m.answer("Не удалось определить получателя.")
+        try:
+            amount = int(parts[1])
+            if amount <= 0: raise ValueError
+        except:
+            return await m.answer("Некорректная сумма.")
     uid = str(m.from_id)
     rid = str(t)
     if uid not in ECONOMY: ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
