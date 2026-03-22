@@ -285,8 +285,8 @@
             },
             "stats": {
                 "778382713": {
-                    "count": 1038,
-                    "last": 1774158345.205145
+                    "count": 1039,
+                    "last": 1774158355.914972
                 },
                 "870757778": {
                     "count": 347,
@@ -608,7 +608,7 @@
             "type": "pl",
             "invite_only": false,
             "quit_mode": false,
-            "filter_enabled": true,
+            "filter_enabled": false,
             "filter_words": [],
             "server": {
                 "owner": 778382713,
