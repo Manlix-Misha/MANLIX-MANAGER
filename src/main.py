@@ -330,10 +330,10 @@ async def get_display_name(user_id: int, peer_id=None, use_nick=True):
         uinfo = await bot.api.users.get(user_ids=[int(user_id)])
         if uinfo and len(uinfo) > 0:
             return f"{uinfo[0].first_name} {uinfo[0].last_name}"
-        return f"id{user_id}"
+        return "MANLIX"
     except Exception as e:
         print(f"get_display_name error for {user_id}: {e}")
-        return f"id{user_id}"
+        return "MANLIX"
 
 async def check_access(m: Message, min_rank: str):
     rank, _ = get_user_info(m.peer_id, m.from_id)
@@ -728,7 +728,7 @@ async def mute_cmd(m: Message, args=None):
     ensure_chat(pid)
     DATABASE["chats"][pid]["mutes"][str(t)] = until
     dt = datetime.datetime.fromtimestamp(until, TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     kb = Keyboard(inline=True)
     kb.row()
     kb.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": str(t)}), color=KeyboardButtonColor.POSITIVE)
@@ -756,7 +756,7 @@ async def unmute_cmd(m: Message, args=None):
     if str(t) in DATABASE["chats"][pid].get("mutes", {}):
         del DATABASE["chats"][pid]["mutes"][str(t)]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) мут [id{t}|{t_display}]")
     await send_log(m.peer_id, m.from_id, "Снятие мута", target_id=t)
 
@@ -1001,7 +1001,7 @@ async def kick_cmd(m: Message, args=None):
         reason = (args or "").strip() or "Нарушение"
     else:
         reason = parse_reason(args) or "Нарушение"
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     try:
         chat_id = m.peer_id - 2000000000
         await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
@@ -1043,7 +1043,7 @@ async def ban_cmd(m: Message, args=None):
     except:
         pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
     await send_log(m.peer_id, m.from_id, "Блокировка", reason=reason, target_id=t)
 
@@ -1060,7 +1060,7 @@ async def unban_cmd(m: Message, args=None):
     if pid in PUNISHMENTS["bans"] and str(t) in PUNISHMENTS["bans"][pid]:
         del PUNISHMENTS["bans"][pid][str(t)]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
     await send_log(m.peer_id, m.from_id, "Снятие Блокировки", target_id=t)
 
@@ -1097,19 +1097,21 @@ async def warn_cmd(m: Message, args=None):
             await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
         except Exception as e:
             print("warn kick error:", e)
+        t_display_w3 = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         await m.answer(
-            f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|пользователю]\n\n"
+            f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|{t_display_w3}]\n\n"
             f"| Причина: {reason}\n"
             f"| Кол-во предупреждений: {current}/3\n\n"
-            f"[id{t}|Пользователь] исключен из Беседы из-за максимального количества предупреждений!"
+            f"[id{t}|{t_display_w3}] исключен из Беседы из-за максимального количества предупреждений!"
         )
         return
+    t_display_w = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     kb = Keyboard(inline=True)
     kb.row()
     kb.add(Callback("Снять варн", {"cmd": "unwarn_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Callback("Очистить",   {"cmd": "clear_msg",  "uid": uid}), color=KeyboardButtonColor.NEGATIVE)
     await m.answer(
-        f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|пользователю]\n\n"
+        f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|{t_display_w}]\n\n"
         f"| Причина: {reason}\n"
         f"| Кол-во предупреждений: {current}/3",
         keyboard=kb.get_json()
@@ -1130,8 +1132,8 @@ async def unwarn_cmd(m: Message, args=None):
         if warns[uid] == 0:
             del warns[uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) предупреждение [id{t}|пользователю]")
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) предупреждение [id{t}|{t_display}]")
 
 
 # ────────────────────────────────────────────────
@@ -1822,7 +1824,7 @@ async def gban_cmd(m: Message, args=None):
     uid    = str(t)
     PUNISHMENTS["gbans_status"][uid] = {"admin": m.from_id, "reason": reason, "date": time.time()}
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] занес [id{t}|{t_display}] в глобальную Блокировку Бота.")
 
 @bot.on.message(text=["/gunban", "/gunban <args>"])
@@ -1835,7 +1837,7 @@ async def gunban(m: Message, args=None):
     if uid in PUNISHMENTS["gbans_status"]:
         del PUNISHMENTS["gbans_status"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] вынес [id{t}|{t_display}] из Глобальной Блокировки Бота.")
 
 
@@ -1872,7 +1874,7 @@ async def zban_cmd(m: Message, args=None):
             kicked += 1
         except:
             pass
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(
         f"[id{m.from_id}|Специальный Руководитель] заблокировал(-а) "
@@ -1897,7 +1899,7 @@ async def zunban_cmd(m: Message, args=None):
         if uid in PUNISHMENTS["bans"][pid_c]:
             del PUNISHMENTS["bans"][pid_c][uid]
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(
         f"[id{m.from_id}|Специальный Руководитель] разблокировал(-а) "
         f"[id{t}|{t_display}] во всех Беседах."
@@ -1929,7 +1931,7 @@ async def gbanpl_cmd(m: Message, args=None):
             except:
                 pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] заблокировал(-а) [id{t}|{t_display}] во всех игровых Беседах.")
 
 @bot.on.message(text=["/gunbanpl", "/gunbanpl <args>"])
@@ -1942,7 +1944,7 @@ async def gunbanpl_cmd(m: Message, args=None):
     if uid in PUNISHMENTS["gbans_pl"]:
         del PUNISHMENTS["gbans_pl"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Специальный Руководитель] разблокировал(-а) [id{t}|{t_display}] во всех игровых Беседах.")
 
 # ────────────────────────────────────────────────
@@ -2683,8 +2685,8 @@ async def transfer(m: Message, args=None):
     ECONOMY[rid]["bank"] += amount
     ECONOMY[rid]["transfers_in"] = ECONOMY[rid].get("transfers_in", 0) + amount
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
-    await m.answer(f"💲Вы перевели [id{t}|пользователю] {amount}$")
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
+    await m.answer(f"💲Вы перевели [id{t}|{t_display}] {amount}$")
 
 @bot.on.message(text=["/roulette <amount>"])
 async def roulette(m: Message, amount=None):
@@ -2954,7 +2956,7 @@ async def skick_cmd(m: Message, args=None):
             "Используйте /server [1-100] для привязки."
         )
     server_pids = get_server_chats(owner_id, server_num)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     if not server_pids:
         return await m.answer("На сервере нет привязанных Бесед.")
     kicked = 0
@@ -3010,7 +3012,7 @@ async def sban_cmd(m: Message, args=None):
         except:
             pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(
         f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) "
         f"[id{t}|{t_display}] в Беседах сервера."
@@ -3133,7 +3135,7 @@ async def sunban_cmd(m: Message, args=None):
         if sp in PUNISHMENTS.get("bans", {}) and uid in PUNISHMENTS["bans"][sp]:
             del PUNISHMENTS["bans"][sp][uid]
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(
         f"[id{m.from_id}|Модератор MANLIX] разблокировал(-а) "
         f"[id{t}|{t_display}] во всех Беседах сервера."
