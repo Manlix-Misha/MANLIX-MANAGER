@@ -319,23 +319,23 @@ async def get_display_name(user_id: int, peer_id=None, use_nick=True):
     """
     Возвращает отображаемое имя пользователя:
     1. Ник из бота (если установлен через /setnick и use_nick=True)
-    2. Имя и фамилия из профиля ВК (через API)
-    3. Ник из бота как резерв (если API упал, даже при use_nick=False)
-    4. Fallback: "id{user_id}" — всегда создаёт рабочую ссылку
+    2. Имя + фамилия из VK API (правильный вызов: int напрямую)
+    3. Ник из бота как резерв (даже при use_nick=False, если API упал)
+    4. Fallback: "id{user_id}" — всегда создаёт рабочую VK-ссылку
     """
-    # Сохраняем ник заранее — может понадобиться как резерв
+    # Сохраняем ник заранее — пригодится как резерв
     nick = None
     if peer_id:
         _, nick = get_user_info(peer_id, user_id)
 
-    # 1. Ник из бота (если разрешён и существует)
+    # 1. Ник из бота (если разрешён)
     if use_nick and nick:
         return nick
 
-    # 2. Имя из профиля ВК
+    # 2. Имя из VK API
+    # ВАЖНО: vkbottle users.get принимает int напрямую, НЕ list и НЕ str
     try:
-        # ВАЖНО: user_ids принимает List[str], не List[int]
-        uinfo = await bot.api.users.get(user_ids=[str(user_id)])
+        uinfo = await bot.api.users.get(int(user_id))
         if uinfo and len(uinfo) > 0:
             first = uinfo[0].first_name or ""
             last  = uinfo[0].last_name  or ""
@@ -343,13 +343,13 @@ async def get_display_name(user_id: int, peer_id=None, use_nick=True):
             if name:
                 return name
     except Exception as e:
-        print(f"get_display_name error for {user_id}: {e}")
+        print(f"[get_display_name] VK API error for {user_id}: {e}")
 
-    # 3. Ник из бота как резерв (даже если use_nick=False, лучше ник чем "id")
+    # 3. Ник из бота как резерв (лучше ник чем цифры)
     if nick:
         return nick
 
-    # 4. Последний резерв — всегда создаёт рабочую VK-ссылку
+    # 4. Последний резерв — рабочая ссылка вида [id123|id123]
     return f"id{user_id}"
 
 async def check_access(m: Message, min_rank: str):
@@ -833,7 +833,7 @@ async def all_buttons(event: MessageEvent):
                 del DATABASE["chats"][pid]["mutes"][uid]
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
             try:
-                u_info = await bot.api.users.get(user_ids=[str(uid)])
+                u_info = await bot.api.users.get(int(uid))
                 u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
             except:
                 u_name = "пользователю"
@@ -866,7 +866,7 @@ async def all_buttons(event: MessageEvent):
             except Exception as e:
                 print("clear_msg error:", e)
             try:
-                u_info2 = await bot.api.users.get(user_ids=[str(uid)])
+                u_info2 = await bot.api.users.get(int(uid))
                 u_name2 = f"{u_info2[0].first_name} {u_info2[0].last_name}"
             except:
                 u_name2 = "пользователя"
@@ -923,7 +923,7 @@ async def all_buttons(event: MessageEvent):
                 del warns[uid]
             await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
         try:
-            u_info = await bot.api.users.get(user_ids=[str(uid)])
+            u_info = await bot.api.users.get(int(uid))
             u_name = f"{u_info[0].first_name} {u_info[0].last_name}"
         except:
             u_name = "пользователю"
@@ -970,12 +970,12 @@ async def all_buttons(event: MessageEvent):
             del DATABASE["duels"][duel_id]
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
             try:
-                w_info = await bot.api.users.get(user_ids=[str(winner)])
+                w_info = await bot.api.users.get(int(winner))
                 w_name = f"{w_info[0].first_name} {w_info[0].last_name}"
             except:
                 w_name = "победитель"
             try:
-                l_info = await bot.api.users.get(user_ids=[str(loser)])
+                l_info = await bot.api.users.get(int(loser))
                 l_name = f"{l_info[0].first_name} {l_info[0].last_name}"
             except:
                 l_name = "проигравший"
@@ -1432,7 +1432,7 @@ async def staff_view(m: Message):
                     display = nick
                 else:
                     try:
-                        uinfo   = await bot.api.users.get(user_ids=[str(u)])
+                        uinfo   = await bot.api.users.get(int(u))
                         display = f"{uinfo[0].first_name} {uinfo[0].last_name}"
                     except:
                         display = f"id{u}"
@@ -1572,7 +1572,7 @@ async def getban_cmd(m: Message, args=None):
         return await m.answer("Укажите пользователя.")
     uid = str(t)
     try:
-        uinfo = await bot.api.users.get(user_ids=[str(t)])
+        uinfo = await bot.api.users.get(int(t))
         name  = f"{uinfo[0].first_name} {uinfo[0].last_name}"
     except:
         name = "пользователь"
