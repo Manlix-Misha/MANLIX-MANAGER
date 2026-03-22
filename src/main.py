@@ -1376,6 +1376,7 @@ async def gunrole_cmd(m: Message, args=None):
 # ────────────────────────────────────────────────
 @bot.on.message(text="/staff")
 async def staff_view(m: Message):
+    if not await check_access(m, "Модератор"): return
     pid = str(m.peer_id)
     ensure_chat(pid)
     staff = DATABASE["chats"].get(pid, {}).get("staff", {})
