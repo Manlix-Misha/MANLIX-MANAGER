@@ -699,7 +699,7 @@ async def stats_cmd(m: Message, args=None):
         f"Блокировок: {bans_cnt}\n"
         f"Общая блокировка в чатах: {gban}\n"
         f"Общая блокировка в беседах игроков: {gbanpl}\n"
-        f"Активные предупреждения: {PUNISHMENTS.get('warns', {}).get(pid, {}).get(uid, 0)}\n"
+        f"Активные предупреждения: {(lambda e: e.get('count',0) if isinstance(e,dict) else e)(PUNISHMENTS.get('warns',{}).get(pid,{}).get(uid,0))}\n"
         f"Блокировка чата: {is_muted}\n"
         f"Ник: {nick_display}\n"
         f"Всего сообщений: {st['count']}\n"
@@ -897,9 +897,12 @@ async def all_buttons(event: MessageEvent):
             await snackbar("Недостаточно прав")
             return
         warns = PUNISHMENTS.get("warns", {}).get(pid_s, {})
-        if uid in warns and warns[uid] > 0:
-            warns[uid] -= 1
-            if warns[uid] == 0:
+        if uid in warns:
+            entry = warns[uid]
+            count = entry.get("count", 0) if isinstance(entry, dict) else entry
+            if count > 1:
+                warns[uid] = {"count": count - 1, "reason": entry.get("reason", "Нарушение") if isinstance(entry, dict) else "Нарушение", "date": time.time()}
+            else:
                 del warns[uid]
             await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
         try:
@@ -1026,9 +1029,10 @@ async def ban_cmd(m: Message, args=None):
     tgt_rank, _ = get_user_info(m.peer_id, t)
     if RANK_WEIGHT.get(tgt_rank, 0) >= RANK_WEIGHT.get(my_rank, 0):
         return await m.answer("Невозможно заблокировать данного пользователя!")
-    parts  = (args or "").split()
-    reason = " ".join(parts[1:]) or "Нарушение"
-    pid    = str(m.peer_id)
+    reason    = parse_reason(args)
+    pid       = str(m.peer_id)
+    # Получаем имя ДО исключения из беседы
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     ensure_chat(pid)
     if pid not in PUNISHMENTS["bans"]:
         PUNISHMENTS["bans"][pid] = {}
@@ -1043,7 +1047,6 @@ async def ban_cmd(m: Message, args=None):
     except:
         pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
     await send_log(m.peer_id, m.from_id, "Блокировка", reason=reason, target_id=t)
 
@@ -1057,10 +1060,10 @@ async def unban_cmd(m: Message, args=None):
     if not t:
         return await m.answer("Укажите пользователя.")
     pid = str(m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     if pid in PUNISHMENTS["bans"] and str(t) in PUNISHMENTS["bans"][pid]:
         del PUNISHMENTS["bans"][pid][str(t)]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
     await send_log(m.peer_id, m.from_id, "Снятие Блокировки", target_id=t)
 
@@ -1086,18 +1089,23 @@ async def warn_cmd(m: Message, args=None):
         PUNISHMENTS["warns"] = {}
     if pid not in PUNISHMENTS["warns"]:
         PUNISHMENTS["warns"][pid] = {}
-    current = min(PUNISHMENTS["warns"][pid].get(uid, 0) + 1, 3)
-    PUNISHMENTS["warns"][pid][uid] = current
+    prev = PUNISHMENTS["warns"][pid].get(uid, {})
+    if isinstance(prev, dict):
+        prev_count = prev.get("count", 0)
+    else:
+        prev_count = prev  # обратная совместимость со старым форматом
+    current = min(prev_count + 1, 3)
+    PUNISHMENTS["warns"][pid][uid] = {"count": current, "reason": reason, "date": time.time()}
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     if current >= 3:
         del PUNISHMENTS["warns"][pid][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+        t_display_w3 = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         try:
             chat_id = m.peer_id - 2000000000
             await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
         except Exception as e:
             print("warn kick error:", e)
-        t_display_w3 = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         await m.answer(
             f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|{t_display_w3}]\n\n"
             f"| Причина: {reason}\n"
@@ -1127,9 +1135,12 @@ async def unwarn_cmd(m: Message, args=None):
     pid = str(m.peer_id)
     uid = str(t)
     warns = PUNISHMENTS.get("warns", {}).get(pid, {})
-    if uid in warns and warns[uid] > 0:
-        warns[uid] -= 1
-        if warns[uid] == 0:
+    if uid in warns:
+        entry = warns[uid]
+        count = entry.get("count", 0) if isinstance(entry, dict) else entry
+        if count > 1:
+            warns[uid] = {"count": count - 1, "reason": entry.get("reason", "Нарушение") if isinstance(entry, dict) else "Нарушение", "date": time.time()}
+        else:
             del warns[uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
