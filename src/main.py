@@ -558,7 +558,7 @@ class ChatMiddleware(BaseMiddleware[Message]):
                         await bot.api.messages.send(
                             peer_id=peer_filter,
                             message=(
-                                f"[id{from_id}|Пользователь] получил(-а) мут на 30 минут "
+                                f"[https://vk.com/id{from_id}|{user_display}] получил(-а) мут на 30 минут "
                                 f"за написание запрещённого слова."
                             ),
                             keyboard=kb_filter.get_json(),
@@ -595,7 +595,7 @@ class ChatMiddleware(BaseMiddleware[Message]):
                     log_msg = (
                         f"…::: MNLX LOGS :::…\n\n"
                         f"| Название Беседы: {chat_title}\n"
-                        f"| Пользователь: [id{from_id}|{user_display}]\n"
+                        f"| Пользователь: [https://vk.com/id{from_id}|{user_display}]\n"
                         f"| VK ID пользователя: {from_id}\n"
                         f"| Содержимое - « {msg_text} »"
                     )
@@ -733,7 +733,7 @@ async def info_cmd(m: Message):
 @bot.on.message(text=["/getid", "/getid <args>"])
 async def getid_cmd(m: Message, args=None):
     t = await get_target_id(m, args) or m.from_id
-    await m.answer(f"Оригинальная ссылка [id{t}|пользователя]: https://vk.com/id{t}")
+    await m.answer(f"Оригинальная ссылка [https://vk.com/id{t}|{t_display}]: [https://vk.com/id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
 # /stats
@@ -774,7 +774,7 @@ async def stats_cmd(m: Message, args=None):
         all_local = get_all_local_roles(pid, uid)
         roles_str = highest_role(all_local) if all_local else "Пользователь"
     msg = (
-        f"Информация о [id{t}|пользователе]\n"
+        f"Информация о [https://vk.com/id{t}|{t_display}]\n"
         f"Роль: {roles_str}\n"
         f"Блокировок: {bans_cnt}\n"
         f"Общая блокировка в чатах: {gban}\n"
@@ -814,7 +814,7 @@ async def mute_cmd(m: Message, args=None):
     kb.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": str(t)}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Callback("Очистить",  {"cmd": "clear_msg",  "uid": str(t)}), color=KeyboardButtonColor.NEGATIVE)
     await m.answer(
-        f"[id{m.from_id}|Модератор MANLIX] выдал(-а) мут [id{t}|{t_display}]\n"
+        f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) мут [https://vk.com/id{t}|{t_display}]\n"
         f"Причина: {reason}\n"
         f"Мут выдан до: {dt}",
         keyboard=kb.get_json()
@@ -837,7 +837,7 @@ async def unmute_cmd(m: Message, args=None):
         del DATABASE["chats"][pid]["mutes"][str(t)]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) мут [id{t}|{t_display}]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] снял(-а) мут [https://vk.com/id{t}|{t_display}]")
     await send_log(m.peer_id, m.from_id, "Снятие мута", target_id=t)
 
 # ────────────────────────────────────────────────
@@ -896,7 +896,7 @@ async def all_buttons(event: MessageEvent):
                 del DATABASE["chats"][pid]["mutes"][uid]
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
             u_name = await get_display_name(int(uid), peer_id=peer_id, use_nick=False)
-            new_text = f"[id{actor_id}|Модератор MANLIX] снял(-а) мут [id{uid}|{u_name}]"
+            new_text = f"[https://vk.com/id{actor_id}|{a_display}] снял(-а) мут [https://vk.com/id{uid}|{u_name}]"
             try:
                 await bot.api.request("messages.edit", {
                     "peer_id": peer_id,
@@ -925,7 +925,7 @@ async def all_buttons(event: MessageEvent):
             except Exception as e:
                 print("clear_msg error:", e)
             u_name2 = await get_display_name(int(uid), peer_id=peer_id, use_nick=False)
-            new_text = f"[id{actor_id}|Модератор MANLIX] очистил(-а) сообщения [id{uid}|{u_name2}]"
+            new_text = f"[https://vk.com/id{actor_id}|{a_display}] очистил(-а) сообщения [https://vk.com/id{uid}|{u_name}]"
             try:
                 await bot.api.request("messages.edit", {
                     "peer_id": peer_id,
@@ -952,7 +952,7 @@ async def all_buttons(event: MessageEvent):
             await bot.api.request("messages.edit", {
                 "peer_id": peer_id,
                 "conversation_message_id": cmid,
-                "message": f"[id{uid}|Пользователь] разблокирован.",
+                "message": f"[https://vk.com/id{uid}|{u_name}] разблокирован.",
                 "keyboard": EMPTY_KB_JSON
             })
         except Exception as e:
@@ -982,7 +982,7 @@ async def all_buttons(event: MessageEvent):
             await bot.api.request("messages.edit", {
                 "peer_id": peer_id,
                 "conversation_message_id": cmid,
-                "message": f"[id{actor_id}|Модератор MANLIX] снял(-а) предупреждение [id{uid}|{u_name}]",
+                "message": f"[https://vk.com/id{actor_id}|{a_display}] снял(-а) предупреждение [https://vk.com/id{uid}|{u_name}]",
                 "keyboard": EMPTY_KB_JSON
             })
         except Exception as e:
@@ -1024,8 +1024,8 @@ async def all_buttons(event: MessageEvent):
             l_name = await get_display_name(int(loser), use_nick=False)
             duel_result = (
                 f"⚔️ Дуэль завершена!\n"
-                f"🏅 Победил – [id{winner}|{w_name}]\n"
-                f"🥈Проиграл – [id{loser}|{l_name}]\n\n"
+                f"🏅 Победил – [https://vk.com/id{winner}|{w_name}]\n"
+                f"🥈Проиграл – [https://vk.com/id{loser}|{l_name}]\n\n"
                 f"💲Победитель выиграл {amount}$"
             )
             try:
@@ -1070,8 +1070,8 @@ async def kick_cmd(m: Message, args=None):
         await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
     except Exception as e:
         print("kick error:", e)
-        return await m.answer(f"Не удалось исключить [id{t}|{t_display}]!")
-    await m.answer(f"[id{m.from_id}|Модератор MANLIX] исключил(-а) [id{t}|{t_display}] из Беседы.")
+        return await m.answer(f"Не удалось исключить [https://vk.com/id{t}|{t_display}]!")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] исключил(-а) [https://vk.com/id{t}|{t_display}] из Беседы.")
     await send_log(m.peer_id, m.from_id, "Исключение", reason=reason, target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1107,7 +1107,7 @@ async def ban_cmd(m: Message, args=None):
     except:
         pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] заблокировал(-а) [https://vk.com/id{t}|{t_display}] в Беседе.")
     await send_log(m.peer_id, m.from_id, "Блокировка", reason=reason, target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1124,7 +1124,7 @@ async def unban_cmd(m: Message, args=None):
     if pid in PUNISHMENTS["bans"] and str(t) in PUNISHMENTS["bans"][pid]:
         del PUNISHMENTS["bans"][pid][str(t)]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] снял(-а) блокировку [https://vk.com/id{t}|{t_display}] в Беседе.")
     await send_log(m.peer_id, m.from_id, "Снятие Блокировки", target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1167,10 +1167,10 @@ async def warn_cmd(m: Message, args=None):
         except Exception as e:
             print("warn kick error:", e)
         await m.answer(
-            f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|{t_display_w3}]\n\n"
+            f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) предупреждение [https://vk.com/id{t}|{t_display}]\n\n"
             f"| Причина: {reason}\n"
             f"| Кол-во предупреждений: {current}/3\n\n"
-            f"[id{t}|{t_display_w3}] исключен из Беседы из-за максимального количества предупреждений!"
+            f"[https://vk.com/id{t}|{t_display}] исключен из Беседы из-за максимального количества предупреждений!"
         )
         return
     t_display_w = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
@@ -1179,7 +1179,7 @@ async def warn_cmd(m: Message, args=None):
     kb.add(Callback("Снять варн", {"cmd": "unwarn_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Callback("Очистить",   {"cmd": "clear_msg",  "uid": uid}), color=KeyboardButtonColor.NEGATIVE)
     await m.answer(
-        f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|{t_display_w}]\n\n"
+        f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) предупреждение [https://vk.com/id{t}|{t_display}]\n\n"
         f"| Причина: {reason}\n"
         f"| Кол-во предупреждений: {current}/3",
         keyboard=kb.get_json()
@@ -1204,7 +1204,7 @@ async def unwarn_cmd(m: Message, args=None):
             del warns[uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) предупреждение [id{t}|{t_display}]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] снял(-а) предупреждение [https://vk.com/id{t}|{t_display}]")
 
 
 # ────────────────────────────────────────────────
@@ -1256,7 +1256,7 @@ async def clear_cmd(m: Message, args=None):
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(
-        f"[id{m.from_id}|{a_display}] очистил(-а) сообщение [id{t}|{t_display}]"
+        f"[https://vk.com/id{m.from_id}|{a_display}] очистил(-а) сообщение [https://vk.com/id{t}|{t_display}]"
     )
 
 # ────────────────────────────────────────────────
@@ -1281,7 +1281,7 @@ async def role_grant(m: Message, args, min_rank, role_name, role_label):
     await set_role_in_chat(pid, uid, role_name, replace=not is_spec)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|пользователю]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) права {role_label} [https://vk.com/id{t}|{t_display}]")
 
 @bot.on.message(text=["/addmoder",    "/addmoder <args>"])
 async def addmod(m: Message, args=None):
@@ -1328,7 +1328,7 @@ async def addzsr(m: Message, args=None):
         gstaff["zams"].append(t)
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [id{t}|пользователю]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [https://vk.com/id{t}|{t_display}]")
 
 @bot.on.message(text=["/addozsr", "/addozsr <args>"])
 async def addozsr(m: Message, args=None):
@@ -1342,7 +1342,7 @@ async def addozsr(m: Message, args=None):
     STAFF["gstaff"]["main_zam"] = t
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя спец. руководителя [id{t}|пользователю]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) права основного заместителя спец. руководителя [https://vk.com/id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
 # /removerole
@@ -1389,12 +1389,12 @@ async def removerole(m: Message, args=None):
                         break
 
     if uid not in DATABASE["chats"][pid].get("staff", {}):
-        return await m.answer(f"У [id{t}|пользователя] нет ролей в этой беседе.")
+        return await m.answer(f"У [https://vk.com/id{t}|{t_display}] нет ролей в этой беседе.")
 
     if role_to_remove:
         all_roles = get_all_local_roles(pid, uid)
         if role_to_remove not in all_roles:
-            return await m.answer(f"У [id{t}|пользователя] нет роли «{role_to_remove}».")
+            return await m.answer(f"У [https://vk.com/id{t}|{t_display}] нет роли «{role_to_remove}».")
         all_roles.remove(role_to_remove)
         if not all_roles:
             del DATABASE["chats"][pid]["staff"][uid]
@@ -1404,11 +1404,11 @@ async def removerole(m: Message, args=None):
             rest = [r for r in all_roles if r != top]
             DATABASE["chats"][pid]["staff"][uid] = [top, nick, rest]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|пользователю]")
+        await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] снял(-а) уровень прав [https://vk.com/id{t}|{t_display}]")
     else:
         del DATABASE["chats"][pid]["staff"][uid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|пользователю]")
+        await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] снял(-а) уровень прав [https://vk.com/id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
 # /gunrole
@@ -1441,7 +1441,7 @@ async def gunrole_cmd(m: Message, args=None):
         return await m.answer("У этого пользователя нет глобальных прав.")
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [id{t}|пользователю]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [https://vk.com/id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
 # /staff
@@ -1475,7 +1475,7 @@ async def staff_view(m: Message):
                     display = nick
                 else:
                     display = await get_display_name(int(u), peer_id=m.peer_id, use_nick=False)
-                members.append(f"– [id{u}|{display}]")
+                members.append(f"– [https://vk.com/id{u}|{display}]")
         if r == "Владелец":
             owner_ids = []
             for u, entry in staff.items():
@@ -1485,9 +1485,10 @@ async def staff_view(m: Message):
                 if "Владелец" in all_roles:
                     owner_ids.append(u)
             if owner_ids:
-                block = f"Владелец -- [id{owner_ids[0]}|MANLIX MANAGER]"
+                owner_display = await get_display_name(int(owner_ids[0]), peer_id=m.peer_id, use_nick=True)
+                block = f"Владелец -- [https://vk.com/id{owner_ids[0]}|{owner_display}]"
                 for oid in owner_ids[1:]:
-                    block += f"\n– [id{oid}|MANLIX MANAGER]"
+                    block += f"\n– [https://vk.com/id{oid}|MANLIX MANAGER]"
             else:
                 block = "Владелец -- MANLIX MANAGER"
         else:
@@ -1537,7 +1538,7 @@ async def setnick(m: Message, args=None):
         extra_roles = []
     DATABASE["chats"][pid]["staff"][uid] = [local_role, new_nick, extra_roles]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] установил(-а) новое имя [https://vk.com/id{t}|{t_display}]: {new_nick}")
     await send_log(m.peer_id, m.from_id, "Выдача ника", target_id=t, new_nick=new_nick)
 
 # ────────────────────────────────────────────────
@@ -1557,7 +1558,7 @@ async def rnick(m: Message, args=None):
         DATABASE["chats"][pid]["staff"][uid] = [entry_r[0], None, extra_r]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|пользователю]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] убрал(-а) имя [https://vk.com/id{t}|{t_display}]")
     await send_log(m.peer_id, m.from_id, "Снятие ника", target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1575,7 +1576,7 @@ async def rnickall(m: Message):
             DATABASE["chats"][pid]["staff"][uid] = [entry[0], None, extra]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] удалил(-а) все установленные ники в Беседе.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] удалил(-а) все установленные ники в Беседе.")
     await send_log(m.peer_id, m.from_id, "Снятие всех ников")
 
 # ────────────────────────────────────────────────
@@ -1593,7 +1594,7 @@ async def nick_list(m: Message):
     msg = "Список пользователей с ником:\n"
     for i, (u, n) in enumerate(users, 1):
         vk_name = await get_display_name(int(u), peer_id=m.peer_id, use_nick=False)
-        msg += f"  {i}. [id{u}|{vk_name}]\nNICK: {n}\n"
+        msg += f"  {i}. [https://vk.com/id{u}|{n}]\nNICK: {n}\n"
     await m.answer(msg.strip())
 
 # ────────────────────────────────────────────────
@@ -1611,14 +1612,14 @@ async def getban_cmd(m: Message, args=None):
         return await m.answer("Укажите пользователя.")
     uid = str(t)
     name = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    ans = f"Информация о блокировках [id{t}|{name}]\n"
+    ans = f"Информация о блокировках [https://vk.com/id{t}|{t_display}]\n"
 
     if uid in PUNISHMENTS.get("gbans_status", {}):
         b  = PUNISHMENTS["gbans_status"][uid]
         dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
         ans += (
             f"\nИнформация о общей блокировке в беседах:\n"
-            f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n"
+            f"[https://vk.com/id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n"
         )
     else:
         ans += "\nИнформация о общей блокировке в беседах: отсутствует\n"
@@ -1628,7 +1629,7 @@ async def getban_cmd(m: Message, args=None):
         dt = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
         ans += (
             f"\nИнформация о блокировке в беседах игроков:\n"
-            f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n"
+            f"[https://vk.com/id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}\n"
         )
     else:
         ans += "\nИнформация о блокировке в беседах игроков: отсутствует\n"
@@ -1640,7 +1641,7 @@ async def getban_cmd(m: Message, args=None):
             title = DATABASE["chats"].get(pid_b, {}).get("title", f"Беседа {pid_b}")
             dt    = datetime.datetime.fromtimestamp(b["date"], TZ_MSK).strftime("%d/%m/%Y %H:%M:%S")
             reason_b = b.get("reason", "-")
-            local_bans.append(f"{title} | [id{b['admin']}|Модератор MANLIX] | {reason_b} | {dt}")
+            local_bans.append(f"{title} | [https://vk.com/id{b['admin']}|Модератор MANLIX] | {reason_b} | {dt}")
 
     if local_bans:
         ans += f"\nКоличество Бесед, в которых заблокирован пользователь: {len(local_bans)}\n"
@@ -1665,13 +1666,13 @@ async def gstaff_view(m: Message):
 
     # Специальный Руководитель
     spec_name = await get_display_name(870757778)
-    res += f"| Специальный Руководитель:\n– [id870757778|{spec_name}]\n\n"
+    res += f"| Специальный Руководитель:\n– [https://vk.com/id870757778|{spec_name}]\n\n"
 
     # Основной Зам. Спец. Руководителя
     res += "| Основной зам. Спец. Руководителя:\n"
     if g.get("main_zam"):
         main_zam_name = await get_display_name(g["main_zam"])
-        res += f"– [id{g['main_zam']}|{main_zam_name}]\n"
+        res += f"– [https://vk.com/id{g['main_zam']}|{main_zam_name}]\n"
     else:
         res += "– Отсутствует.\n"
 
@@ -1681,7 +1682,7 @@ async def gstaff_view(m: Message):
     if zams:
         for z in zams:
             zam_name = await get_display_name(z)
-            res += f"– [id{z}|{zam_name}]\n"
+            res += f"– [https://vk.com/id{z}|{zam_name}]\n"
     else:
         res += "– Отсутствует.\n– Отсутствует.\n"
 
@@ -1864,7 +1865,7 @@ async def msg_cmd(m: Message, args=None):
             except Exception as e:
                 print(f"/msg send error to {pid_c}:", e)
     await m.answer(
-        f"[id{m.from_id}|{a_display}] отправил рассылку в типы бесед « {chat_type} »"
+        f"[https://vk.com/id{m.from_id}|{a_display}] отправил рассылку в типы бесед « {chat_type} »"
     )
 
 # ────────────────────────────────────────────────
@@ -1888,7 +1889,7 @@ async def gban_cmd(m: Message, args=None):
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] занес [id{t}|{t_display}] в глобальную Блокировку Бота.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] занес [https://vk.com/id{t}|{t_display}] в глобальную Блокировку Бота.")
 
 @bot.on.message(text=["/gunban", "/gunban <args>"])
 async def gunban(m: Message, args=None):
@@ -1901,7 +1902,7 @@ async def gunban(m: Message, args=None):
         del PUNISHMENTS["gbans_status"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] вынес [id{t}|{t_display}] из Глобальной Блокировки Бота.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] вынес [https://vk.com/id{t}|{t_display}] из Глобальной Блокировки Бота.")
 
 
 # ────────────────────────────────────────────────
@@ -1940,8 +1941,8 @@ async def zban_cmd(m: Message, args=None):
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(
-        f"[id{m.from_id}|Специальный Руководитель] заблокировал(-а) "
-        f"[id{t}|{t_display}] во всех Беседах."
+        f"[https://vk.com/id{m.from_id}|{a_display}] заблокировал(-а) "
+        f"[https://vk.com/id{t}|{t_display}] во всех Беседах."
     )
 
 @bot.on.message(text=["/zunban", "/zunban <args>"])
@@ -1964,8 +1965,8 @@ async def zunban_cmd(m: Message, args=None):
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(
-        f"[id{m.from_id}|Специальный Руководитель] разблокировал(-а) "
-        f"[id{t}|{t_display}] во всех Беседах."
+        f"[https://vk.com/id{m.from_id}|{a_display}] разблокировал(-а) "
+        f"[https://vk.com/id{t}|{t_display}] во всех Беседах."
     )
 
 # ────────────────────────────────────────────────
@@ -1995,7 +1996,7 @@ async def gbanpl_cmd(m: Message, args=None):
                 pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] заблокировал(-а) [id{t}|{t_display}] во всех игровых Беседах.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] заблокировал(-а) [https://vk.com/id{t}|{t_display}] во всех игровых Беседах.")
 
 @bot.on.message(text=["/gunbanpl", "/gunbanpl <args>"])
 async def gunbanpl_cmd(m: Message, args=None):
@@ -2008,7 +2009,7 @@ async def gunbanpl_cmd(m: Message, args=None):
         del PUNISHMENTS["gbans_pl"][uid]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"[id{m.from_id}|Специальный Руководитель] разблокировал(-а) [id{t}|{t_display}] во всех игровых Беседах.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] разблокировал(-а) [https://vk.com/id{t}|{t_display}] во всех игровых Беседах.")
 
 # ────────────────────────────────────────────────
 # Система тестировщиков
@@ -2061,7 +2062,7 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
         STAFF["testers"][uid]["role"] = role_name
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|пользователю]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) права {role_label} [https://vk.com/id{t}|{t_display}]")
 
 @bot.on.message(text="/thelp")
 async def thelp_cmd(m: Message):
@@ -2122,10 +2123,10 @@ async def tstats_cmd(m: Message, args=None):
     role, bugs = get_tester_info(t)
     if not role:
         t_name = await get_display_name(t, peer_id=m.peer_id)
-        return await m.answer(f"[id{t}|{t_name}] не является тестировщиком.")
+        return await m.answer(f"[https://vk.com/id{t}|{t_name}] не является тестировщиком.")
     now = datetime.datetime.now(TZ_MSK)
     await m.answer(
-        f"Статистика [id{t}|тестировщика]\n\n"
+        f"Статистика [https://vk.com/id{t}|{t_display}]\n\n"
         f"Должность: {role}\n"
         f"Отправлено Багов: {bugs}\n\n"
         f"Дата: {now.strftime('%d/%m/%Y')}\n"
@@ -2154,12 +2155,12 @@ async def bug_cmd(m: Message, args=None):
     bug_text = (args or "").strip()
 
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] отправил отчет с Багами.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] отправил отчет с Багами.")
 
     now = datetime.datetime.now(TZ_MSK)
     report = (
         f"…::: BUG REPORT :::…\n\n"
-        f"| Тестировщик: [id{m.from_id}|MANLIX]\n"
+        f"| Тестировщик: [https://vk.com/id{m.from_id}|{a_display}]\n"
         f"| Время: {now.strftime('%H:%M:%S')}\n"
         f"| Дата: {now.strftime('%d/%m/%Y')}\n\n"
         f"| Отчет: « {bug_text} »"
@@ -2210,23 +2211,27 @@ async def tstaff_cmd(m: Message):
 
     if gt_list:
         gt_uid = gt_list[0][0]
-        res += f"Главный тестировщик -- [id{gt_uid}|MANLIX]\n"
+        gt_name = await get_display_name(int(gt_uid), use_nick=False)
+        res += f"Главный тестировщик -- [https://vk.com/id{gt_uid}|{gt_name}]\n"
         for uid, _ in gt_list[1:]:
-            res += f"– [id{uid}|MANLIX]\n"
+            n = await get_display_name(int(uid), use_nick=False)
+            res += f"– [https://vk.com/id{uid}|{n}]\n"
     else:
         res += "Главный тестировщик -- Отсутствует.\n"
 
     res += "\nСтаршие тестировщики:\n"
     if sen_list:
         for uid, _ in sen_list:
-            res += f"– [id{uid}|Тестировщик MANLIX]\n"
+            n = await get_display_name(int(uid), use_nick=False)
+            res += f"– [https://vk.com/id{uid}|{n}]\n"
     else:
         res += "– Отсутствуют.\n"
 
     res += "\nТестировщики:\n"
     if t_list:
         for uid, _ in t_list:
-            res += f"– [id{uid}|Тестировщик MANLIX]\n"
+            n = await get_display_name(int(uid), use_nick=False)
+            res += f"– [https://vk.com/id{uid}|{n}]\n"
     else:
         res += "– Отсутствуют."
 
@@ -2254,7 +2259,7 @@ async def add_cmd(m: Message, args=None):
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     form = (
         "…::: ПРЕДЛОЖЕНИЕ :::…\n\n"
-        f"| Тестировщик: [id{m.from_id}|MANLIX]\n"
+        f"| Тестировщик: [https://vk.com/id{m.from_id}|{a_display}]\n"
         f"| Время: {now.strftime('%H:%M:%S')}\n"
         f"| Дата: {now.strftime('%d/%m/%Y')}\n\n"
         f"| Предложение: {suggestion}"
@@ -2271,7 +2276,7 @@ async def add_cmd(m: Message, args=None):
                 sent = True
             except Exception as e:
                 print(f"/add send error to {pid_c}:", e)
-    await m.answer(f"[id{m.from_id}|{a_display}] отправил(-а) предложение по улучшению Бота.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] отправил(-а) предложение по улучшению Бота.")
 
 @bot.on.message(text=["/addtester", "/addtester <args>"])
 async def addtester_cmd(m: Message, args=None):
@@ -2296,7 +2301,7 @@ async def addgt_cmd(m: Message, args=None):
         STAFF["testers"][uid]["role"] = "Главный Тестировщик"
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [id{t}|пользователю]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [https://vk.com/id{t}|{t_display}]")
 
 @bot.on.message(text=["/removetester", "/removetester <args>"])
 async def removetester_cmd(m: Message, args=None):
@@ -2319,7 +2324,7 @@ async def removetester_cmd(m: Message, args=None):
     del STAFF["testers"][uid]
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] забрал(-а) права тестировщика [id{t}|пользователю]")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] забрал(-а) права тестировщика [https://vk.com/id{t}|{t_display}]")
 
 
 # ────────────────────────────────────────────────
@@ -2341,7 +2346,7 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
 
     if target_id:
         tgt_display  = await get_display_name(target_id, peer_id=peer_id, use_nick=False)
-        target_line  = f"\n| Пользователь -- [id{target_id}|{tgt_display}]"
+        target_line  = f"\n| Пользователь -- [https://vk.com/id{target_id}|{tgt_display}]"
         vkid_target  = f"\n| VK ID пользователя: {target_id}"
     else:
         target_line = ""
@@ -2355,7 +2360,7 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
         f"| CHAT ID -- {peer_id}\n"
         f"| Действие -- {action}\n"
         f"| {('Новое имя: ' + new_nick) if new_nick else ('Причина наказания: ' + (reason or '—'))}"
-        f"\n\n| Модератор -- [id{moderator_id}|{mod_display}]"
+        f"\n\n| Модератор -- [https://vk.com/id{moderator_id}|Модератор MANLIX]"
         f"{target_line}"
         f"\n| VK ID модератора: {moderator_id}"
         f"{vkid_target}"
@@ -2461,7 +2466,7 @@ async def get_info_cmd(m: Message, args=None):
     game_ban = 1 if uid in PUNISHMENTS.get("gbans_pl", {}) else 0
     now = datetime.datetime.now(TZ_MSK)
     await m.answer(
-        f"Информация о [id{t}|пользователе]\n\n"
+        f"Информация о [https://vk.com/id{t}|{t_display}]\n\n"
         f"| Владелец в кол-ве Бесед: « {owner_count} »\n"
         f"| Кол-во Блокировок: « {bans_cnt} »\n"
         f"| Игровая Блокировка: « {game_ban} »\n\n"
@@ -2492,7 +2497,7 @@ async def get_game_cmd(m: Message, args=None):
     duel_losses_sum  = eco.get("duel_losses", 0)
     now = datetime.datetime.now(TZ_MSK)
     await m.answer(
-        f"Информация о [id{t}|пользователе]\n\n"
+        f"Информация о [https://vk.com/id{t}|{t_display}]\n\n"
         f"| Баланс: « {cash}$ »\n"
         f"| Счет в Банке: « {bank}$ »\n\n"
         f"| Получено переводами: « {transfers_in}$ »\n"
@@ -2556,15 +2561,15 @@ async def reset_money_cmd(m: Message, args=None):
     spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     t_display    = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(
-        f"[id{m.from_id}|Технический Специалист] обнулил Баланс [id{t}|пользователю]"
+        f"[https://vk.com/id{m.from_id}|{a_display}] обнулил Баланс [https://vk.com/id{t}|{t_display}]"
     )
     # Второе сообщение — отчёт о действии
     now = datetime.datetime.now(TZ_MSK)
     await m.answer(
         f"Информация о действии ТС:\n\n"
-        f"| Тех. Специалист -- [id{m.from_id}|{spec_display}]\n"
+        f"| Тех. Специалист -- [https://vk.com/id{m.from_id}|{a_display}]\n"
         f"| VK ID Тех. Специалиста: {m.from_id}\n\n"
-        f"| Пользователь -- [id{t}|{t_display}]\n"
+        f"| Пользователь -- [https://vk.com/id{t}|{t_display}]\n"
         f"| VK ID пользователя: {t}\n"
         f"| Общий Баланс до обнуления:\n"
         f"« {total_before} »"
@@ -2593,7 +2598,7 @@ async def reset_chat_cmd(m: Message, args=None):
     if target_pid in DATABASE.get("chats", {}):
         del DATABASE["chats"][target_pid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) чат {target_pid}")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] обнулил(-а) чат {target_pid}")
 
 @bot.on.message(text="/reset_chat_all")
 async def reset_chat_all_cmd(m: Message):
@@ -2610,7 +2615,7 @@ async def reset_chat_all_cmd(m: Message):
     spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     DATABASE["chats"] = {}
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) все чаты из Базы данных.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] обнулил(-а) все чаты из Базы данных.")
 
 @bot.on.message(text="/reset_economy")
 async def reset_economy_cmd(m: Message):
@@ -2627,7 +2632,7 @@ async def reset_economy_cmd(m: Message):
     spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     ECONOMY = {}
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(f"[id{m.from_id}|Технический Специалист] обнулил(-а) экономику Бота.")
+    await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] обнулил(-а) экономику Бота.")
 
 # ────────────────────────────────────────────────
 # Игровые команды
@@ -2675,7 +2680,7 @@ async def balance_cmd(m: Message, args=None):
     bank  = eco.get("bank", 0)
     total = cash + bank
     name  = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"💰Общий баланс [id{t}|{name}]: {total}$")
+    await m.answer(f"💰Общий баланс [https://vk.com/id{t}|{t_display}]: {total}$")
 
 @bot.on.message(text="/bank")
 async def bank_cmd(m: Message):
@@ -2758,7 +2763,7 @@ async def transfer(m: Message, args=None):
     ECONOMY[rid]["transfers_in"] = ECONOMY[rid].get("transfers_in", 0) + amount
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"💲Вы перевели [id{t}|{t_display}] {amount}$")
+    await m.answer(f"💲Вы перевели [https://vk.com/id{t}|{t_display}] {amount}$")
 
 @bot.on.message(text=["/roulette <amount>"])
 async def roulette(m: Message, amount=None):
@@ -2826,9 +2831,9 @@ async def invite_cmd(m: Message):
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     if not current:
-        await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) функцию добавления только модерацией!")
+        await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] включил(-а) функцию добавления только модерацией!")
     else:
-        await m.answer(f"[id{m.from_id}|{a_display}] отключил(-а) функцию добавления только модерацией!")
+        await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] отключил(-а) функцию добавления только модерацией!")
 
 # ────────────────────────────────────────────────
 # /quit
@@ -2843,9 +2848,9 @@ async def quit_cmd(m: Message):
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     if not current:
-        await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) режим тишины!")
+        await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] включил(-а) режим тишины!")
     else:
-        await m.answer(f"[id{m.from_id}|{a_display}] выключил(-а) режим тишины!")
+        await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] выключил(-а) режим тишины!")
 
 # ────────────────────────────────────────────────
 # /filter
@@ -2865,9 +2870,9 @@ async def filter_cmd(m: Message, args=None):
         DATABASE["chats"][pid]["filter_enabled"] = not current
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
         if not current:
-            await m.answer(f"[id{m.from_id}|{a_display}] включил(-а) фильтр запрещённых слов!")
+            await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] включил(-а) фильтр запрещённых слов!")
         else:
-            await m.answer(f"[id{m.from_id}|{a_display}] выключил(-а) фильтр запрещённых слов!")
+            await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] выключил(-а) фильтр запрещённых слов!")
         return
 
     parts = args.strip().split(None, 1)
@@ -2887,7 +2892,7 @@ async def filter_cmd(m: Message, args=None):
         DATABASE["chats"][pid]["filter_enabled"] = True
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
         extra = " (фильтр автоматически включён)" if was_disabled else ""
-        await m.answer(f"[id{m.from_id}|{a_display}] добавил(-а) новое запрещённое слово в фильтр{extra}.")
+        await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] добавил(-а) новое запрещённое слово в фильтр{extra}.")
 
     elif subcmd == "del":
         if w < 9:
@@ -2899,7 +2904,7 @@ async def filter_cmd(m: Message, args=None):
             words.remove(word)
             DATABASE["chats"][pid]["filter_words"] = words
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer(f"[id{m.from_id}|{a_display}] удалил(-а) запрещённое слово из фильтра.")
+        await m.answer(f"[https://vk.com/id{m.from_id}|{a_display}] удалил(-а) запрещённое слово из фильтра.")
 
     else:
         await m.answer("Неизвестная подкоманда. Используй: /filter, /filter add [слово], /filter del [слово]")
@@ -3002,7 +3007,7 @@ async def serverinfo_cmd(m: Message):
         chats_list += f"\n– {title}"
     await m.answer(
         f"Информация о сервере:\n\n"
-        f"| Владелец -- [id{owner_id}|{owner_display}]\n"
+        f"| Владелец -- [https://vk.com/id{owner_id}|MANLIX MANAGER]\n"
         f"| Номер сервера -- « {server_num} »\n"
         f"| Кол-во Бесед -- « {len(server_pids)} »\n"
         f"\nСписок Бесед сервера:{chats_list}"
@@ -3041,10 +3046,10 @@ async def skick_cmd(m: Message, args=None):
         except:
             failed += 1
     if kicked == 0:
-        return await m.answer(f"Пользователя не удалось исключить [id{t}|{t_display}]!")
+        return await m.answer(f"Пользователя не удалось исключить [https://vk.com/id{t}|{t_display}]!")
     await m.answer(
-        f"[id{m.from_id}|Модератор MANLIX] исключил(-а) "
-        f"[id{t}|{t_display}] в Беседах сервера."
+        f"[https://vk.com/id{m.from_id}|{a_display}] исключил(-а) "
+        f"[https://vk.com/id{t}|{t_display}] в Беседах сервера."
     )
 
 @bot.on.message(text=["/sban", "/sban <args>"])
@@ -3086,8 +3091,8 @@ async def sban_cmd(m: Message, args=None):
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(
-        f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) "
-        f"[id{t}|{t_display}] в Беседах сервера."
+        f"[https://vk.com/id{m.from_id}|{a_display}] заблокировал(-а) "
+        f"[https://vk.com/id{t}|{t_display}] в Беседах сервера."
     )
 
 
@@ -3152,8 +3157,8 @@ async def srole_cmd(m: Message, args=None):
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(
-        f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} "
-        f"[id{t}|пользователю] во всех Беседах сервера."
+        f"[https://vk.com/id{m.from_id}|{a_display}] выдал(-а) права {role_label} "
+        f"[https://vk.com/id{t}|{t_display}] во всех Беседах сервера."
     )
 
 
@@ -3184,8 +3189,8 @@ async def sunrole_cmd(m: Message, args=None):
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(
-        f"[id{m.from_id}|{a_display}] забрал уровень прав "
-        f"[id{t}|пользователя] во всех Беседах сервера."
+        f"[https://vk.com/id{m.from_id}|{a_display}] забрал уровень прав "
+        f"[https://vk.com/id{t}|{t_display}] во всех Беседах сервера."
     )
 
 @bot.on.message(text=["/sunban", "/sunban <args>"])
@@ -3209,8 +3214,8 @@ async def sunban_cmd(m: Message, args=None):
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(
-        f"[id{m.from_id}|Модератор MANLIX] разблокировал(-а) "
-        f"[id{t}|{t_display}] во всех Беседах сервера."
+        f"[https://vk.com/id{m.from_id}|{a_display}] разблокировал(-а) "
+        f"[https://vk.com/id{t}|{t_display}] во всех Беседах сервера."
     )
 
 # ────────────────────────────────────────────────
@@ -3272,9 +3277,9 @@ async def actions(m: Message):
             await bot.api.messages.send(
                 peer_id=m.peer_id,
                 message=(
-                    f"[id{invited}|Пользователь] находится в Глобальной Блокировке.\n\n"
+                    f"[https://vk.com/id{invited}|пользователя] находится в Глобальной Блокировке.\n\n"
                     f"Информация о Блокировке:\n"
-                    f"[id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}"
+                    f"[https://vk.com/id{b['admin']}|Модератор MANLIX] | {b.get('reason', '-')} | {dt}"
                 ),
                 keyboard=kb.get_json(),
                 random_id=random.randint(0, 2**31)
@@ -3292,7 +3297,7 @@ async def actions(m: Message):
             except:
                 pass
             await m.answer(
-                f"[id870757778|Модератор MANLIX] исключил(-а) [id{invited}|пользователя] "
+                f"https://vk.com/id870757778 исключил(-а) [https://vk.com/id{invited}|пользователя] "
                 f"— он находится в списке блокировок."
             )
 
