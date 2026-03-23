@@ -316,8 +316,8 @@
             },
             "stats": {
                 "778382713": {
-                    "count": 1744,
-                    "last": 1774251593.302766
+                    "count": 1745,
+                    "last": 1774251603.199949
                 },
                 "870757778": {
                     "count": 443,
@@ -468,8 +468,8 @@
                     "last": 1774061723.749273
                 },
                 "1092911472": {
-                    "count": 271,
-                    "last": 1774251581.9083
+                    "count": 273,
+                    "last": 1774251599.725848
                 },
                 "870478120": {
                     "count": 18,
@@ -962,7 +962,7 @@
             },
             "type": "pl",
             "invite_only": false,
-            "quit_mode": true,
+            "quit_mode": false,
             "filter_enabled": false,
             "filter_words": [],
             "server": {
