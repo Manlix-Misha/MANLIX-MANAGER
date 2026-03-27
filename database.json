@@ -1091,7 +1091,7 @@
             },
             "type": "pl",
             "invite_only": false,
-            "quit_mode": true,
+            "quit_mode": false,
             "filter_enabled": false,
             "filter_words": [],
             "server": {
