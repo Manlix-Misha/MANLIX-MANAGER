@@ -66,6 +66,95 @@ TEX_RANK_WEIGHT = {
 # ────────────────────────────────────────────────
 USER_NAMES_CACHE: dict = {}  # {user_id: "Имя Фамилия"}
 
+
+# ────────────────────────────────────────────────
+# Альтернативные префиксы и алиасы команд (/alt)
+# ────────────────────────────────────────────────
+# Ключ = каноническая команда (без префикса)
+# Значение = список алиасов (тоже без префикса)
+ALT_PREFIXES = ('/', '+', '.', '-')
+
+ALT_ALIASES: dict = {
+    # Пользователи
+    "info":          [],
+    "stats":         ["статс", "стата"],
+    "getid":         ["id", "ид", "гетид"],
+    "alt":           [],
+    "help":          [],
+    # Модераторы
+    "staff":         ["стафф"],
+    "kick":          ["кик", "исключить"],
+    "mute":          ["мут", "мьют"],
+    "unmute":        ["снятьмут", "анмут", "унмут"],
+    "setnick":       ["snick", "nick", "ник", "сетник"],
+    "rnick":         ["removenick", "clearnick", "cnick", "рник", "снятьник"],
+    "nlist":         ["nicklist", "nicks", "ники"],
+    "getban":        ["checkban", "чекбан", "гетбан"],
+    "warn":          ["варн", "пред", "предупреждение"],
+    "unwarn":        ["анварн", "унварн", "снятьварн", "снятьпред"],
+    "clear":         ["del", "очистить", "чистка"],
+    # Старшие модераторы
+    "addmoder":      ["moder", "модер"],
+    "removerole":    ["rrole", "снятьроль"],
+    "ban":           ["бан", "блокировка"],
+    "unban":         ["унбан", "снятьбан"],
+    # Администраторы
+    "addsenmoder":   ["senmoder", "смодер"],
+    "quit":          ["silence", "тишина"],
+    "rnickall":      ["allrnick", "mrnick"],
+    # Старшие администраторы
+    "addadmin":      ["admin", "админ"],
+    "skick":         ["скик"],
+    "sban":          ["сбан"],
+    "sunban":        ["санбан", "сунбан"],
+    "srole":         ["pullrole", "prole", "сроле"],
+    "sunrole":       ["srrole"],
+    # ЗСА
+    "addsenadmin":   ["addsenadm", "senadm", "садмин"],
+    # СА
+    "addzsa":        ["зса"],
+    # Владелец
+    "addsa":         ["са"],
+    "invite":        ["инвайт", "инв"],
+    "filter":        ["фильтр"],
+    "server":        ["сервер"],
+    "serverinfo":    ["серверинфо"],
+}
+
+# Обратный словарь: алиас → каноническая команда
+_ALT_REVERSE: dict = {}
+for _canon, _aliases in ALT_ALIASES.items():
+    _ALT_REVERSE[_canon] = _canon          # сам на себя
+    for _a in _aliases:
+        _ALT_REVERSE[_a] = _canon
+
+def normalize_command(text: str) -> str:
+    """
+    Если текст начинается с одного из ALT_PREFIXES и первое слово
+    является алиасом — возвращает нормализованный '/canon args'.
+    Иначе возвращает исходный текст.
+    """
+    if not text:
+        return text
+    # Проверяем префикс
+    if text[0] not in ALT_PREFIXES:
+        return text
+    # Префикс есть — отрезаем его
+    rest = text[1:]                         # команда + возможные аргументы
+    parts = rest.split(None, 1)
+    if not parts:
+        return text
+    cmd_word = parts[0].lower()
+    args_str = parts[1] if len(parts) > 1 else ""
+    # Ищем в обратном словаре
+    canon = _ALT_REVERSE.get(cmd_word)
+    if canon is None:
+        return text                         # неизвестная команда — не трогаем
+    # Возвращаем нормализованный вид
+    if args_str:
+        return f"/{canon} {args_str}"
+    return f"/{canon}"
+
 # ────────────────────────────────────────────────
 # HTTP-сервер
 # ────────────────────────────────────────────────
@@ -455,6 +544,12 @@ class ChatMiddleware(BaseMiddleware[Message]):
         pid = str(self.event.peer_id)
         uid = str(from_id)
 
+        # Нормализация альтернативных префиксов/алиасов
+        raw_text = self.event.text or ""
+        normalized = normalize_command(raw_text)
+        if normalized != raw_text:
+            self.event.text = normalized
+
         # ── Проверка bot_status ──────────────────────
         status = DATABASE.get("bot_status", "on")
         if status != "on":
@@ -610,6 +705,90 @@ class ChatMiddleware(BaseMiddleware[Message]):
 
 bot.labeler.message_view.register_middleware(ChatMiddleware)
 
+
+# ────────────────────────────────────────────────
+# /alt — альтернативные команды и префиксы
+# ────────────────────────────────────────────────
+@bot.on.message(text=["/alt", "/alt <args>"])
+async def alt_cmd(m: Message, args=None):
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    rank, _ = get_user_info(m.peer_id, m.from_id)
+    w = RANK_WEIGHT.get(rank, 0)
+
+    msg = (
+        "Альтернативные команды\n\n"
+        "| Префиксы для команд:\n"
+        "- « / »\n"
+        "- « + »\n"
+        "- « . »\n"
+        "- « - »\n\n"
+        "Команды пользователей:\n"
+        "/info -- инфо\n"
+        "/stats -- статс, стата\n"
+        "/getid -- id, ид, гетид"
+    )
+    if w >= 1:  # Модераторы и выше
+        msg += (
+            "\n\nКоманды модераторов:\n"
+            "/staff -- стафф\n"
+            "/kick -- кик, исключить\n"
+            "/mute -- мут, мьют\n"
+            "/unmute -- снятьмут, анмут, унмут\n"
+            "/setnick -- snick, nick, ник, сетник\n"
+            "/rnick -- removenick, рник, снятьник\n"
+            "/nlist -- nicklist, nicks, ники\n"
+            "/getban -- checkban, чекбан, гетбан\n"
+            "/warn -- варн, пред, предупреждение\n"
+            "/unwarn -- анварн, унварн, снятьварн\n"
+            "/clear -- del, очистить, чистка"
+        )
+    if w >= 2:  # Старшие модераторы
+        msg += (
+            "\n\nКоманды старших модераторов:\n"
+            "/addmoder -- moder, модер\n"
+            "/removerole -- rrole, снятьроль\n"
+            "/ban -- бан, блокировка\n"
+            "/unban -- унбан, снятьбан"
+        )
+    if w >= 3:  # Администраторы
+        msg += (
+            "\n\nКоманды администраторов:\n"
+            "/addsenmoder -- senmoder, смодер\n"
+            "/quit -- silence, тишина\n"
+            "/rnickall -- allrnick, mrnick"
+        )
+    if w >= 4:  # Старшие администраторы
+        msg += (
+            "\n\nКоманды старших администраторов:\n"
+            "/addadmin -- admin, админ\n"
+            "/skick -- скик\n"
+            "/sban -- сбан\n"
+            "/sunban -- санбан, сунбан\n"
+            "/srole -- pullrole, prole, сроле\n"
+            "/sunrole -- srrole"
+        )
+    if w >= 5:  # ЗСА
+        msg += (
+            "\n\nКоманды заместителей спец. администраторов:\n"
+            "/addsenadmin -- addsenadm, senadm, садмин"
+        )
+    if w >= 6:  # СА
+        msg += (
+            "\n\nКоманды спец. администраторов:\n"
+            "/addzsa -- зса"
+        )
+    if w >= 7:  # Владелец
+        msg += (
+            "\n\nКоманды владельца:\n"
+            "/addsa -- са\n"
+            "/invite -- инвайт, инв\n"
+            "/filter -- фильтр\n"
+            "/server -- сервер\n"
+            "/serverinfo -- серверинфо"
+        )
+    await m.answer(msg)
+
 # ────────────────────────────────────────────────
 # /help
 # ОБНОВЛЕНО по Notion (статус: Готово)
@@ -734,7 +913,7 @@ async def info_cmd(m: Message):
 async def getid_cmd(m: Message, args=None):
     t = await get_target_id(m, args) or m.from_id
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"Оригинальная ссылка [id{t}|{t_display}]: [id{t}|{t_display}]")
+    await m.answer(f"Оригинальная ссылка [id{t}|пользователя]: https://vk.com/id{t}")
 
 # ────────────────────────────────────────────────
 # /stats
@@ -776,7 +955,7 @@ async def stats_cmd(m: Message, args=None):
         all_local = get_all_local_roles(pid, uid)
         roles_str = highest_role(all_local) if all_local else "Пользователь"
     msg = (
-        f"Информация о [id{t}|{t_display}]\n"
+        f"Информация о [id{t}|пользователе]\n"
         f"Роль: {roles_str}\n"
         f"Блокировок: {bans_cnt}\n"
         f"Общая блокировка в чатах: {gban}\n"
@@ -817,7 +996,7 @@ async def mute_cmd(m: Message, args=None):
     kb.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": str(t)}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Callback("Очистить",  {"cmd": "clear_msg",  "uid": str(t)}), color=KeyboardButtonColor.NEGATIVE)
     await m.answer(
-        f"[id{m.from_id}|{a_display}] выдал(-а) мут [id{t}|{t_display}]\n"
+        f"[id{m.from_id}|Модератор MANLIX] выдал(-а) мут [id{t}|{t_display}]\n"
         f"Причина: {reason}\n"
         f"Мут выдан до: {dt}",
         keyboard=kb.get_json()
@@ -841,7 +1020,7 @@ async def unmute_cmd(m: Message, args=None):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) мут [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) мут [id{t}|{t_display}]")
     await send_log(m.peer_id, m.from_id, "Снятие мута", target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1079,7 +1258,7 @@ async def kick_cmd(m: Message, args=None):
     except Exception as e:
         print("kick error:", e)
         return await m.answer(f"Не удалось исключить [id{t}|{t_display}]!")
-    await m.answer(f"[id{m.from_id}|{a_display}] исключил(-а) [id{t}|{t_display}] из Беседы.")
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] исключил(-а) [id{t}|{t_display}] из Беседы.")
     await send_log(m.peer_id, m.from_id, "Исключение", reason=reason, target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1116,7 +1295,7 @@ async def ban_cmd(m: Message, args=None):
     except:
         pass
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|{a_display}] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] заблокировал(-а) [id{t}|{t_display}] в Беседе.")
     await send_log(m.peer_id, m.from_id, "Блокировка", reason=reason, target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1134,7 +1313,7 @@ async def unban_cmd(m: Message, args=None):
     if pid in PUNISHMENTS["bans"] and str(t) in PUNISHMENTS["bans"][pid]:
         del PUNISHMENTS["bans"][pid][str(t)]
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) блокировку [id{t}|{t_display}] в Беседе.")
     await send_log(m.peer_id, m.from_id, "Снятие Блокировки", target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1178,7 +1357,7 @@ async def warn_cmd(m: Message, args=None):
         except Exception as e:
             print("warn kick error:", e)
         await m.answer(
-            f"[id{m.from_id}|{a_display}] выдал(-а) предупреждение [id{t}|{t_display}]\n\n"
+            f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|пользователю]\n\n"
             f"| Причина: {reason}\n"
             f"| Кол-во предупреждений: {current}/3\n\n"
             f"[id{t}|{t_display}] исключен из Беседы из-за максимального количества предупреждений!"
@@ -1190,7 +1369,7 @@ async def warn_cmd(m: Message, args=None):
     kb.add(Callback("Снять варн", {"cmd": "unwarn_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Callback("Очистить",   {"cmd": "clear_msg",  "uid": uid}), color=KeyboardButtonColor.NEGATIVE)
     await m.answer(
-        f"[id{m.from_id}|{a_display}] выдал(-а) предупреждение [id{t}|{t_display}]\n\n"
+        f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|пользователю]\n\n"
         f"| Причина: {reason}\n"
         f"| Кол-во предупреждений: {current}/3",
         keyboard=kb.get_json()
@@ -1216,7 +1395,7 @@ async def unwarn_cmd(m: Message, args=None):
         await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) предупреждение [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|Модератор MANLIX] снял(-а) предупреждение [id{t}|пользователю]")
 
 
 # ────────────────────────────────────────────────
@@ -1330,7 +1509,6 @@ async def addzsr(m: Message, args=None):
     if not await check_access(m, "Основной Зам. Спец. Руководителя"): return
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя.")
     if t == m.from_id:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
@@ -1350,7 +1528,6 @@ async def addozsr(m: Message, args=None):
     if not await check_access(m, "Специальный Руководитель"): return
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя.")
     if t == m.from_id:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
@@ -1385,7 +1562,6 @@ async def removerole(m: Message, args=None):
     if not await check_access(m, "Старший Модератор"): return
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя.")
     pid, uid = str(m.peer_id), str(t)
     ensure_chat(pid)
@@ -1434,7 +1610,6 @@ async def gunrole_cmd(m: Message, args=None):
     if not await check_access(m, "Зам. Спец. Руководителя"): return
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя.")
     if t == m.from_id:
         return await m.answer("Нельзя снимать права у самого себя.")
@@ -1554,7 +1729,7 @@ async def setnick(m: Message, args=None):
         extra_roles = []
     DATABASE["chats"][pid]["staff"][uid] = [local_role, new_nick, extra_roles]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|{t_display}]: {new_nick}")
+    await m.answer(f"[id{m.from_id}|{a_display}] установил(-а) новое имя [id{t}|пользователю]: {new_nick}")
     await send_log(m.peer_id, m.from_id, "Выдача ника", target_id=t, new_nick=new_nick)
 
 # ────────────────────────────────────────────────
@@ -1565,7 +1740,6 @@ async def rnick(m: Message, args=None):
     if not await check_access(m, "Модератор"): return
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя или ответьте на его сообщение.")
     pid, uid = str(m.peer_id), str(t)
     ensure_chat(pid)
@@ -1575,7 +1749,7 @@ async def rnick(m: Message, args=None):
         DATABASE["chats"][pid]["staff"][uid] = [entry_r[0], None, extra_r]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|{t_display}]")
+    await m.answer(f"[id{m.from_id}|{a_display}] убрал(-а) имя [id{t}|пользователю]")
     await send_log(m.peer_id, m.from_id, "Снятие ника", target_id=t)
 
 # ────────────────────────────────────────────────
@@ -1626,11 +1800,10 @@ async def getban_cmd(m: Message, args=None):
     if not t:
         t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя.")
     uid = str(t)
     name = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    ans = f"Информация о блокировках [id{t}|{t_display}]\n"
+    ans = f"Информация о блокировках [id{t}|{name}]\n"
 
     if uid in PUNISHMENTS.get("gbans_status", {}):
         b  = PUNISHMENTS["gbans_status"][uid]
@@ -2074,7 +2247,6 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
         return await m.answer("Недостаточно прав!")
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя.")
     if t == m.from_id:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
@@ -2315,7 +2487,6 @@ async def addgt_cmd(m: Message, args=None):
     if not await check_access(m, "Зам. Спец. Руководителя"): return
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя.")
     if t == m.from_id:
         return await m.answer("Вы не можете выдать роль данному пользователю!")
@@ -2340,7 +2511,6 @@ async def removetester_cmd(m: Message, args=None):
         return await m.answer("Недостаточно прав!")
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя!")
     if t == m.from_id:
         return await m.answer("Вы не можете снять права у самого себя!")
@@ -2578,7 +2748,6 @@ async def reset_money_cmd(m: Message, args=None):
         return await m.answer("Недостаточно прав!")
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя.")
     uid = str(t)
     if uid not in ECONOMY:
@@ -2702,7 +2871,6 @@ async def balance_cmd(m: Message, args=None):
     elif args:
         t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         t = m.from_id
     uid   = str(t)
     eco   = ECONOMY.get(uid, {})
@@ -3146,7 +3314,6 @@ async def srole_cmd(m: Message, args=None):
     if not await check_access(m, "Администратор"): return
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer(
             "Использование: /srole [ссылка/упоминание] [1-6]\n\n"
             "1 — Модератор\n"
@@ -3200,7 +3367,6 @@ async def sunrole_cmd(m: Message, args=None):
     if not await check_access(m, "Администратор"): return
     t = await get_target_id(m, args)
     if not t:
-        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer("Укажите пользователя!")
     if t == m.from_id:
         return await m.answer("Вы не можете снять роль у самого себя!")
