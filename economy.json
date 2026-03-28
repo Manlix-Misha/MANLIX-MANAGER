@@ -153,7 +153,13 @@
         "bank": 0,
         "last": 1774496146.3563159,
         "duel_wins": 79,
-        "duel_losses": 100
+        "duel_losses": 100,
+        "pivo": {
+            "total": 0.8,
+            "last": 1774708275.7048478,
+            "month": "2026-03",
+            "month_total": 0.8
+        }
     },
     "1069300357": {
         "cash": 21,
