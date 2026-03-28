@@ -2256,6 +2256,7 @@ async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_l
     else:
         STAFF["testers"][uid]["role"] = role_name
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} [id{t}|{t_display}]")
 
@@ -2322,7 +2323,7 @@ async def tstats_cmd(m: Message, args=None):
         return await m.answer(f"[id{t}|{t_name}] не является тестировщиком.")
     now = datetime.datetime.now(TZ_MSK)
     await m.answer(
-        f"Статистика [id{t}|{t_display}]\n\n"
+        f"Информация о [id{t}|тестировщике]\n\n"
         f"Должность: {role}\n"
         f"Отправлено Багов: {bugs}\n\n"
         f"Дата: {now.strftime('%d/%m/%Y')}\n"
@@ -2408,7 +2409,7 @@ async def tstaff_cmd(m: Message):
     if gt_list:
         gt_uid = gt_list[0][0]
         gt_name = await get_display_name(int(gt_uid), use_nick=False)
-        res += f"Главный тестировщик -- [id{gt_uid}|{gt_name}]\n"
+        res += f"Главный тестировщик -- [id{gt_uid}|MANLIX]\n"
         for uid, _ in gt_list[1:]:
             n = await get_display_name(int(uid), use_nick=False)
             res += f"– [id{uid}|{n}]\n"
@@ -2496,6 +2497,7 @@ async def addgt_cmd(m: Message, args=None):
     else:
         STAFF["testers"][uid]["role"] = "Главный Тестировщик"
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права главного тестировщика [id{t}|{t_display}]")
 
@@ -2831,6 +2833,77 @@ async def reset_economy_cmd(m: Message):
     ECONOMY = {}
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
     await m.answer(f"[id{m.from_id}|{a_display}] обнулил(-а) экономику Бота.")
+
+
+# ────────────────────────────────────────────────
+# /пиво / /пивозавры
+# ────────────────────────────────────────────────
+@bot.on.message(text="/пиво")
+async def pivo_cmd(m: Message):
+    uid = str(m.from_id)
+    now = time.time()
+
+    if uid not in ECONOMY:
+        ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
+    if "pivo" not in ECONOMY[uid]:
+        ECONOMY[uid]["pivo"] = {"total": 0.0, "last": 0, "month": "", "month_total": 0.0}
+
+    pivo = ECONOMY[uid]["pivo"]
+
+    # Кулдаун 1 час
+    if now - pivo.get("last", 0) < 3600:
+        return await m.answer("🍺 Следующая попытка через час.")
+
+    # 0.1–3.0 литра с шагом 0.1
+    amount = round(random.choice([x / 10 for x in range(1, 31)]), 1)
+
+    # Сброс месячного счётчика при смене месяца
+    current_month = datetime.datetime.now(TZ_MSK).strftime("%Y-%m")
+    if pivo.get("month") != current_month:
+        pivo["month"] = current_month
+        pivo["month_total"] = 0.0
+
+    pivo["total"]       = round(pivo.get("total", 0.0) + amount, 1)
+    pivo["month_total"] = round(pivo.get("month_total", 0.0) + amount, 1)
+    pivo["last"]        = now
+
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+
+    name = await get_display_name(m.from_id, peer_id=m.peer_id, use_nick=False)
+    await m.answer(
+        f"[id{m.from_id}|{name}], ты выпил {amount} литра пива!\n\n"
+        f"Выпито всего - {pivo['total']} л. 🍻\n"
+        f"Следующая попытка через час."
+    )
+
+@bot.on.message(text="/пивозавры")
+async def pivozavry_cmd(m: Message):
+    now_dt        = datetime.datetime.now(TZ_MSK)
+    current_month = now_dt.strftime("%Y-%m")
+    month_name    = now_dt.strftime("%B %Y")
+
+    leaders = []
+    for uid, eco in ECONOMY.items():
+        pivo = eco.get("pivo")
+        if not pivo:
+            continue
+        if pivo.get("month") != current_month:
+            continue
+        month_total = pivo.get("month_total", 0.0)
+        if month_total > 0:
+            leaders.append((uid, month_total))
+
+    leaders.sort(key=lambda x: x[1], reverse=True)
+
+    if not leaders:
+        return await m.answer(f"🍺 Топ пивозавров за {month_name}:\n\nПока никто не пил пиво.")
+
+    msg = f"Топ пивозавров за {month_name}:\n\n"
+    for i, (uid, total) in enumerate(leaders[:10], 1):
+        name = await get_display_name(int(uid), peer_id=m.peer_id, use_nick=False)
+        msg += f"{i}. [id{uid}|{name}]  Выпито - {total} литров.\n"
+
+    await m.answer(msg.strip())
 
 # ────────────────────────────────────────────────
 # Игровые команды
