@@ -113,7 +113,13 @@
         "cash": 0,
         "bank": 100,
         "last": 0,
-        "transfers_in": 100
+        "transfers_in": 100,
+        "pivo": {
+            "total": 1.3,
+            "last": 1774803276.1818762,
+            "month": "2026-03",
+            "month_total": 1.3
+        }
     },
     "1092911472": {
         "cash": 0,
