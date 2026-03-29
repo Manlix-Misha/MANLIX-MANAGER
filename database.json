@@ -1959,11 +1959,11 @@
                     "last": 1774799584.353374
                 },
                 "870757778": {
-                    "count": 1,
-                    "last": 1774799882.955779
+                    "count": 2,
+                    "last": 1774799887.824841
                 }
             },
-            "type": "def",
+            "type": "pl",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
