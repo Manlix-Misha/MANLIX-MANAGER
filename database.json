@@ -96,8 +96,8 @@
                     "last": 1774814105.211397
                 },
                 "457884119": {
-                    "count": 7,
-                    "last": 1774814135.999856
+                    "count": 9,
+                    "last": 1774814222.978413
                 },
                 "612715623": {
                     "count": 66,
@@ -1308,12 +1308,21 @@
             "title": "Чат 2000000024",
             "staff": {},
             "mutes": {},
-            "stats": {},
+            "stats": {
+                "870757778": {
+                    "count": 1,
+                    "last": 1774814246.848939
+                }
+            },
             "type": "def",
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
-            "filter_words": []
+            "filter_words": [],
+            "server": {
+                "owner": 870757778,
+                "num": 2
+            }
         },
         "2000000029": {
             "title": "MANLIX | TEST BOT 2",
