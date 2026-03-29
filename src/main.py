@@ -76,7 +76,7 @@ ALT_PREFIXES = ('/', '+', '.', '-')
 
 ALT_ALIASES: dict = {
     # Пользователи
-    "info":          [],
+    "info":          ["инфо"],
     "stats":         ["статс", "стата"],
     "getid":         ["id", "ид", "гетид"],
     "alt":           [],
@@ -104,7 +104,7 @@ ALT_ALIASES: dict = {
     "rnickall":      ["allrnick", "mrnick"],
     # Старшие администраторы
     "addadmin":      ["admin", "админ"],
-    "skick":         ["скик"],
+    "skick":         ["скик", "снят"],
     "sban":          ["сбан"],
     "sunban":        ["санбан", "сунбан"],
     "srole":         ["pullrole", "prole", "сроле"],
@@ -174,7 +174,8 @@ async def load_from_github(gh_path, local_path):
         return load_local_data(local_path)
     url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
     headers = {"Authorization": f"token {GH_TOKEN}"}
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False),
+                                     timeout=aiohttp.ClientTimeout(total=15)) as session:
         async with session.get(url, headers=headers) as resp:
             if resp.status == 200:
                 doc = await resp.json()
@@ -1356,6 +1357,7 @@ async def warn_cmd(m: Message, args=None):
             await bot.api.messages.remove_chat_user(chat_id=chat_id, member_id=t)
         except Exception as e:
             print("warn kick error:", e)
+        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         await m.answer(
             f"[id{m.from_id}|Модератор MANLIX] выдал(-а) предупреждение [id{t}|пользователю]\n\n"
             f"| Причина: {reason}\n"
@@ -1520,6 +1522,7 @@ async def addzsr(m: Message, args=None):
         gstaff["zams"].append(t)
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права заместителя специального руководителя [id{t}|{t_display}]")
 
 @bot.on.message(text=["/addozsr", "/addozsr <args>"])
@@ -1534,6 +1537,7 @@ async def addozsr(m: Message, args=None):
     STAFF["gstaff"]["main_zam"] = t
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|{a_display}] выдал(-а) права основного заместителя спец. руководителя [id{t}|{t_display}]")
 
 # ────────────────────────────────────────────────
@@ -1581,6 +1585,7 @@ async def removerole(m: Message, args=None):
                         break
 
     if uid not in DATABASE["chats"][pid].get("staff", {}):
+        t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer(f"У [id{t}|{t_display}] нет ролей в этой беседе.")
 
     if role_to_remove:
@@ -1632,6 +1637,7 @@ async def gunrole_cmd(m: Message, args=None):
     if not removed:
         return await m.answer("У этого пользователя нет глобальных прав.")
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) глобальный уровень прав [id{t}|{t_display}]")
 
@@ -1785,7 +1791,7 @@ async def nick_list(m: Message):
     msg = "Список пользователей с ником:\n"
     for i, (u, n) in enumerate(users, 1):
         vk_name = await get_display_name(int(u), peer_id=m.peer_id, use_nick=False)
-        msg += f"  {i}. [id{u}|{n}]\nNICK: {n}\n"
+        msg += f" {i}. [id{u}|{vk_name}]\n{i}: {n}\n"
     await m.answer(msg.strip())
 
 # ────────────────────────────────────────────────
@@ -2522,6 +2528,7 @@ async def removetester_cmd(m: Message, args=None):
     del STAFF["testers"][uid]
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"[id{m.from_id}|{a_display}] забрал(-а) права тестировщика [id{t}|{t_display}]")
 
 
@@ -2951,6 +2958,7 @@ async def balance_cmd(m: Message, args=None):
     bank  = eco.get("bank", 0)
     total = cash + bank
     name  = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     await m.answer(f"💰Общий баланс [id{t}|{t_display}]: {total}$")
 
 @bot.on.message(text="/bank")
@@ -3428,6 +3436,7 @@ async def srole_cmd(m: Message, args=None):
     for sp in server_pids:
         await set_role_in_chat(sp, uid, role_name, replace=True)
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(
         f"[id{m.from_id}|{a_display}] выдал(-а) права {role_label} "
@@ -3460,6 +3469,7 @@ async def sunrole_cmd(m: Message, args=None):
         if uid in DATABASE.get("chats", {}).get(sp, {}).get("staff", {}):
             del DATABASE["chats"][sp]["staff"][uid]
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     await m.answer(
         f"[id{m.from_id}|{a_display}] забрал уровень прав "
