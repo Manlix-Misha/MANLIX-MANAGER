@@ -6,7 +6,13 @@
         "duel_losses": 478,
         "duel_wins": 402,
         "transfers_out": 200,
-        "transfers_in": 647
+        "transfers_in": 647,
+        "pivo": {
+            "total": 2.9,
+            "last": 1774783398.4259548,
+            "month": "2026-03",
+            "month_total": 2.9
+        }
     },
     "778382713": {
         "cash": 133,
