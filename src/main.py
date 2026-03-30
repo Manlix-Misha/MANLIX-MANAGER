@@ -5,6 +5,11 @@ import json
 import base64
 import aiohttp
 import datetime
+try:
+    import pymysql
+    import pymysql.cursors
+except ImportError:
+    pymysql = None
 import random
 import asyncio
 import time
@@ -17,6 +22,13 @@ from vkbottle import Keyboard, KeyboardButtonColor, Text, Callback, GroupEventTy
 # ────────────────────────────────────────────────
 GH_TOKEN    = os.environ.get("GH_TOKEN")
 GH_REPO     = os.environ.get("GH_REPO")
+
+# MySQL (Aiven) — новое хранилище данных
+DB_HOST     = os.environ.get("DB_HOST", "")
+DB_PORT     = int(os.environ.get("DB_PORT", "3306"))  # порт должен быть int!
+DB_USER     = os.environ.get("DB_USER", "")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
+DB_NAME     = "defaultdb"  # имя базы на Aiven по умолчанию
 GH_PATH_DB    = "database.json"
 GH_PATH_ECO   = "economy.json"
 GH_PATH_PUN   = "punishments.json"
@@ -60,6 +72,273 @@ TEX_RANK_WEIGHT = {
     "Зам. Главного ТС":       3,
     "Главный ТС":             4,
 }
+
+# ────────────────────────────────────────────────
+# Кэш имён пользователей — избегаем лишних API вызовов
+# ────────────────────────────────────────────────
+USER_NAMES_CACHE: dict = {}  # {user_id: "Имя Фамилия"}
+
+
+# ────────────────────────────────────────────────
+# Альтернативные префиксы и алиасы команд (/alt)
+# ────────────────────────────────────────────────
+# Ключ = каноническая команда (без префикса)
+# Значение = список алиасов (тоже без префикса)
+ALT_PREFIXES = ('/', '+', '.', '-')
+
+ALT_ALIASES: dict = {
+    # Пользователи
+    "info":          ["инфо"],
+    "stats":         ["статс", "стата"],
+    "getid":         ["id", "ид", "гетид"],
+    "alt":           [],
+    "help":          [],
+    # Модераторы
+    "staff":         ["стафф"],
+    "kick":          ["кик", "исключить"],
+    "mute":          ["мут", "мьют"],
+    "unmute":        ["снятьмут", "анмут", "унмут"],
+    "setnick":       ["snick", "nick", "ник", "сетник"],
+    "rnick":         ["removenick", "clearnick", "cnick", "рник", "снятьник"],
+    "nlist":         ["nicklist", "nicks", "ники"],
+    "getban":        ["checkban", "чекбан", "гетбан"],
+    "warn":          ["варн", "пред", "предупреждение"],
+    "unwarn":        ["анварн", "унварн", "снятьварн", "снятьпред"],
+    "clear":         ["del", "очистить", "чистка"],
+    # Старшие модераторы
+    "addmoder":      ["moder", "модер"],
+    "removerole":    ["rrole", "снятьроль"],
+    "ban":           ["бан", "блокировка"],
+    "unban":         ["унбан", "снятьбан"],
+    # Администраторы
+    "addsenmoder":   ["senmoder", "смодер"],
+    "quit":          ["silence", "тишина"],
+    "rnickall":      ["allrnick", "mrnick"],
+    # Старшие администраторы
+    "addadmin":      ["admin", "админ"],
+    "skick":         ["скик", "снят"],
+    "sban":          ["сбан"],
+    "sunban":        ["санбан", "сунбан"],
+    "srole":         ["pullrole", "prole", "сроле"],
+    "sunrole":       ["srrole"],
+    # ЗСА
+    "addsenadmin":   ["addsenadm", "senadm", "садмин"],
+    # СА
+    "addzsa":        ["зса"],
+    # Владелец
+    "addsa":         ["са"],
+    "invite":        ["инвайт", "инв"],
+    "filter":        ["фильтр"],
+    "server":        ["сервер"],
+    "serverinfo":    ["серверинфо"],
+}
+
+# Обратный словарь: алиас → каноническая команда
+_ALT_REVERSE: dict = {}
+for _canon, _aliases in ALT_ALIASES.items():
+    _ALT_REVERSE[_canon] = _canon          # сам на себя
+    for _a in _aliases:
+        _ALT_REVERSE[_a] = _canon
+
+def normalize_command(text: str) -> str:
+    """
+    Если текст начинается с одного из ALT_PREFIXES и первое слово
+    является алиасом — возвращает нормализованный '/canon args'.
+    Иначе возвращает исходный текст.
+    """
+    if not text:
+        return text
+    # Проверяем префикс
+    if text[0] not in ALT_PREFIXES:
+        return text
+    # Префикс есть — отрезаем его
+    rest = text[1:]                         # команда + возможные аргументы
+    parts = rest.split(None, 1)
+    if not parts:
+        return text
+    cmd_word = parts[0].lower()
+    args_str = parts[1] if len(parts) > 1 else ""
+    # Ищем в обратном словаре
+    canon = _ALT_REVERSE.get(cmd_word)
+    if canon is None:
+        return text                         # неизвестная команда — не трогаем
+    # Возвращаем нормализованный вид
+    if args_str:
+        return f"/{canon} {args_str}"
+    return f"/{canon}"
+
+# ────────────────────────────────────────────────
+# HTTP-сервер
+# ────────────────────────────────────────────────
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, format, *args):
+        pass
+
+# ────────────────────────────────────────────────
+# Загрузка / сохранение данных
+# ────────────────────────────────────────────────
+async def load_from_github(gh_path, local_path):
+    if not GH_TOKEN or not GH_REPO:
+        return load_local_data(local_path)
+    url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
+    headers = {"Authorization": f"token {GH_TOKEN}"}
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False),
+                                     timeout=aiohttp.ClientTimeout(total=15)) as session:
+        async with session.get(url, headers=headers) as resp:
+            if resp.status == 200:
+                doc = await resp.json()
+                if "content" in doc:
+                    data = json.loads(base64.b64decode(doc["content"]).decode("utf-8"))
+                    with open(local_path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=4)
+                    return data
+            if resp.status != 404:
+                print(f"GitHub load failed: {resp.status}")
+    return load_local_data(local_path)
+
+# ────────────────────────────────────────────────
+# MySQL (Aiven) — хранилище данных
+# ────────────────────────────────────────────────
+_TABLE_MAP = {
+    "database.json":    "bot_database",
+    "economy.json":     "bot_economy",
+    "punishments.json": "bot_punishments",
+    "staff.json":       "bot_staff",
+}
+
+def _get_db_conn():
+    """Создаёт подключение к MySQL с SSL (обязательно для Aiven)."""
+    if not pymysql or not DB_HOST:
+        return None
+    try:
+        return pymysql.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            ssl={"ssl_disabled": False},  # SSL — обязателен для Aiven!
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=True,
+            connect_timeout=10,
+        )
+    except Exception as e:
+        print(f"[MySQL] Ошибка подключения: {e}")
+        return None
+
+
+def load_local_data(path):
+    """Фоллбек: читаем из локального .json файла."""
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"load_local_data error ({path}): {e}")
+    return {}
+
+
+async def load_from_github(gh_path: str, local_path: str) -> dict:
+    """
+    Загружает данные.
+    Приоритет: MySQL → GitHub (резерв, если MySQL недоступен).
+    """
+    table = _TABLE_MAP.get(gh_path)
+    if table:
+        conn = _get_db_conn()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT data_json FROM {table} WHERE data_key='main' LIMIT 1")
+                    row = cur.fetchone()
+                    if row:
+                        return json.loads(row["data_json"])
+            except Exception as e:
+                print(f"[MySQL] load {table}: {e}")
+            finally:
+                conn.close()
+
+    # Фоллбек: GitHub
+    if GH_TOKEN and GH_REPO:
+        url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
+        headers = {"Authorization": f"token {GH_TOKEN}"}
+        timeout = aiohttp.ClientTimeout(total=15)
+        try:
+            async with aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(ssl=False),
+                timeout=timeout
+            ) as session:
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status == 200:
+                        doc = await resp.json()
+                        if "content" in doc:
+                            data = json.loads(base64.b64decode(doc["content"]).decode("utf-8"))
+                            with open(local_path, "w", encoding="utf-8") as f:
+                                json.dump(data, f, ensure_ascii=False, indent=4)
+                            return data
+        except Exception as e:
+            print(f"[GitHub] load {gh_path}: {e}")
+
+    return load_local_data(local_path)
+
+
+async def push_to_github(data: dict, gh_path: str, local_path: str):
+    """
+    Сохраняет данные.
+    Основное: MySQL. Запасное: GitHub (если MySQL недоступен).
+    """
+    # 1. MySQL — основное хранилище
+    table = _TABLE_MAP.get(gh_path)
+    if table:
+        conn = _get_db_conn()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""INSERT INTO {table} (data_key, data_json)
+                            VALUES ('main', %s)
+                            ON DUPLICATE KEY UPDATE data_json = VALUES(data_json)""",
+                        (json.dumps(data, ensure_ascii=False),)
+                    )
+                return  # успешно сохранено в MySQL
+            except Exception as e:
+                print(f"[MySQL] push {table}: {e}")
+            finally:
+                conn.close()
+
+    # 2. Фоллбек: GitHub
+    if GH_TOKEN and GH_REPO:
+        url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
+        headers = {"Authorization": f"token {GH_TOKEN}", "Content-Type": "application/json"}
+        encoded = base64.b64encode(
+            json.dumps(data, ensure_ascii=False, indent=4).encode("utf-8")
+        ).decode("utf-8")
+        timeout = aiohttp.ClientTimeout(total=15)
+        try:
+            async with aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(ssl=False),
+                timeout=timeout
+            ) as session:
+                async with session.get(url, headers=headers) as r:
+                    sha = (await r.json()).get("sha", "") if r.status == 200 else ""
+                payload = json.dumps({"message": "update", "content": encoded, "sha": sha})
+                async with session.put(url, headers=headers, data=payload):
+                    pass
+        except Exception as e:
+            print(f"[GitHub] push {gh_path}: {e}")
+
+    # 3. Локальный файл (последний резерв)
+    try:
+        with open(local_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"[Local] push {local_path}: {e}")
+
 
 # ────────────────────────────────────────────────
 # Кэш имён пользователей — избегаем лишних API вызовов
