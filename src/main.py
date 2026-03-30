@@ -865,7 +865,7 @@ async def help_cmd(m: Message):
             "/serverinfo -- информация о сервере."
         )
     await m.answer(res)
-    if w >= 8:
+    if w >= 8:  # ЗСР и выше
         gres = (
             "Команды руководства Бота:\n\n"
             "Зам. Спец. Руководителя:\n"
@@ -875,21 +875,27 @@ async def help_cmd(m: Message):
             "/gbanpl -- Блокировка пользователя во всех игровых Беседах.\n"
             "/gunbanpl -- Снятие Блокировки во всех игровых Беседах.\n"
             "/zban -- Блокировка пользователя во всех Беседах.\n"
-            "/zunban -- Снятие всех блокировок пользователя.\n\n"
-            "Основной Зам. Спец. Руководителя:\n"
-            "/addzsr -- Выдать права заместителя спец. руководителя.\n"
-            "/thelp -- Список команд для тестировщиков.\n"
-            "/msg -- Отправить рассылку.\n\n"
-            "Спец. Руководителя:\n"
-            "/addozsr -- Выдать права основного заместителя спец. руководителя.\n"
-            "/start -- Активировать Беседу.\n"
-            "/type -- Изменить тип Беседы.\n"
-            "/typetex -- Изменить технический тип Беседы.\n"
-            "/sync -- Синхронизация с базой данных.\n"
-            "/botstatus -- Изменить статус Бота.\n"
-            "/chatid -- Узнать айди Беседы.\n"
-            "/delchat -- Удалить чат с Базы данных."
+            "/zunban -- Снятие всех блокировок пользователя."
         )
+        if w >= 9:  # ОЗСР и выше
+            gres += (
+                "\n\nОсновной Зам. Спец. Руководителя:\n"
+                "/addzsr -- Выдать права заместителя спец. руководителя.\n"
+                "/thelp -- Список команд для тестировщиков.\n"
+                "/msg -- Отправить рассылку."
+            )
+        if w >= 10:  # СР
+            gres += (
+                "\n\nСпец. Руководителя:\n"
+                "/addozsr -- Выдать права основного заместителя спец. руководителя.\n"
+                "/start -- Активировать Беседу.\n"
+                "/type -- Изменить тип Беседы.\n"
+                "/typetex -- Изменить технический тип Беседы.\n"
+                "/sync -- Синхронизация с базой данных.\n"
+                "/botstatus -- Изменить статус Бота.\n"
+                "/chatid -- Узнать айди Беседы.\n"
+                "/delchat -- Удалить чат с Базы данных."
+            )
         await m.answer(gres)
 
 # ────────────────────────────────────────────────
@@ -1570,6 +1576,7 @@ async def removerole(m: Message, args=None):
     pid, uid = str(m.peer_id), str(t)
     ensure_chat(pid)
     a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
 
     role_to_remove = None
     if args:
@@ -1788,10 +1795,10 @@ async def nick_list(m: Message):
     users = [(u, entry[1]) for u, entry in staff.items() if entry[1]]
     if not users:
         return await m.answer("Никнеймы не установлены.")
-    msg = "Список пользователей с ником:\n"
+    msg = "Список пользователей с ником:\n\n"
     for i, (u, n) in enumerate(users, 1):
         vk_name = await get_display_name(int(u), peer_id=m.peer_id, use_nick=False)
-        msg += f" {i}. [id{u}|{vk_name}]\n{i}: {n}\n"
+        msg += f"{i}. [id{u}|{vk_name}]\nN: {n}\n"
     await m.answer(msg.strip())
 
 # ────────────────────────────────────────────────
@@ -2551,7 +2558,7 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
 
     if target_id:
         tgt_display  = await get_display_name(target_id, peer_id=peer_id, use_nick=False)
-        target_line  = f"\n| Пользователь -- [id{target_id}|{tgt_display}]"
+        target_line  = f"\n| Пользователь -- [id{target_id}|MANLIX]"
         vkid_target  = f"\n| VK ID пользователя: {target_id}"
     else:
         target_line = ""
@@ -2565,7 +2572,7 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
         f"| CHAT ID -- {peer_id}\n"
         f"| Действие -- {action}\n"
         f"| {('Новое имя: ' + new_nick) if new_nick else ('Причина наказания: ' + (reason or '—'))}"
-        f"\n\n| Модератор -- [id{moderator_id}|Модератор MANLIX]"
+        f"\n\n| Модератор -- [id{moderator_id}|MANLIX]"
         f"{target_line}"
         f"\n| VK ID модератора: {moderator_id}"
         f"{vkid_target}"
