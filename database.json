@@ -2056,8 +2056,8 @@
             "mutes": {},
             "stats": {
                 "778382713": {
-                    "count": 5,
-                    "last": 1774881973.810565
+                    "count": 8,
+                    "last": 1774882206.914924
                 },
                 "870757778": {
                     "count": 10,
@@ -2068,7 +2068,11 @@
             "invite_only": false,
             "quit_mode": false,
             "filter_enabled": false,
-            "filter_words": []
+            "filter_words": [],
+            "server": {
+                "owner": 778382713,
+                "num": 5
+            }
         }
     },
     "gstaff": {
