@@ -1,9 +1,9 @@
 {
     "870757778": {
-        "cash": 975,
+        "cash": 875,
         "bank": 147,
         "last": 1774854862.8931043,
-        "duel_losses": 478,
+        "duel_losses": 578,
         "duel_wins": 735,
         "transfers_out": 700,
         "transfers_in": 647,
@@ -191,10 +191,10 @@
         "duel_losses": 116
     },
     "768072847": {
-        "cash": 306,
+        "cash": 406,
         "bank": 0,
         "last": 1774865095.2275312,
-        "duel_wins": 79,
+        "duel_wins": 179,
         "duel_losses": 100,
         "pivo": {
             "total": 34.1,
