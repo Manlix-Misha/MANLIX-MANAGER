@@ -2,14 +2,11 @@ import os
 import threading
 import re
 import json
-import base64
-import aiohttp
 import datetime
 try:
-    import pymysql
-    import pymysql.cursors
+    import aiomysql
 except ImportError:
-    pymysql = None
+    aiomysql = None
 import random
 import asyncio
 import time
@@ -20,10 +17,7 @@ from vkbottle import Keyboard, KeyboardButtonColor, Text, Callback, GroupEventTy
 # ────────────────────────────────────────────────
 # НАСТРОЙКИ
 # ────────────────────────────────────────────────
-GH_TOKEN    = os.environ.get("GH_TOKEN")
-GH_REPO     = os.environ.get("GH_REPO")
-
-# MySQL (Aiven) — новое хранилище данных
+# MySQL (Aiven) — хранилище данных
 DB_HOST     = os.environ.get("DB_HOST", "")
 DB_PORT     = int(os.environ.get("DB_PORT", "3306"))  # порт должен быть int!
 DB_USER     = os.environ.get("DB_USER", "")
@@ -179,172 +173,136 @@ class H(BaseHTTPRequestHandler):
         pass
 
 # ────────────────────────────────────────────────
-# Загрузка / сохранение данных
+# MySQL (Aiven) — хранилище данных (aiomysql, async)
 # ────────────────────────────────────────────────
-async def load_from_github(gh_path, local_path):
-    if not GH_TOKEN or not GH_REPO:
-        return load_local_data(local_path)
-    url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
-    headers = {"Authorization": f"token {GH_TOKEN}"}
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False),
-                                     timeout=aiohttp.ClientTimeout(total=15)) as session:
-        async with session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                doc = await resp.json()
-                if "content" in doc:
-                    data = json.loads(base64.b64decode(doc["content"]).decode("utf-8"))
-                    with open(local_path, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=4)
-                    return data
-            if resp.status != 404:
-                print(f"GitHub load failed: {resp.status}")
-    return load_local_data(local_path)
-
-# ────────────────────────────────────────────────
-# MySQL (Aiven) — хранилище данных
-# ────────────────────────────────────────────────
+# Маппинг ключей → таблицы MySQL
+# 1. Чаты       — беседы, настройки, статистика
+# 2. Наказания  — блокировки, муты, варны
+# 3. Экономика  — деньги, пиво, мини-игры
+# 4. Руководство — гстаф, тестировщики, тех.специалисты
 _TABLE_MAP = {
-    "database.json":    "bot_database",
-    "economy.json":     "bot_economy",
-    "punishments.json": "bot_punishments",
-    "staff.json":       "bot_staff",
+    "database.json":    "chats",
+    "economy.json":     "economy",
+    "punishments.json": "punishments",
+    "staff.json":       "staff",
 }
 
-def _get_db_conn():
-    """Создаёт подключение к MySQL с SSL (обязательно для Aiven)."""
-    if not pymysql or not DB_HOST:
-        return None
-    try:
-        return pymysql.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            database=DB_NAME,
-            ssl={"ssl_disabled": False},  # SSL — обязателен для Aiven!
-            charset="utf8mb4",
-            cursorclass=pymysql.cursors.DictCursor,
-            autocommit=True,
-            connect_timeout=10,
-        )
-    except Exception as e:
-        print(f"[MySQL] Ошибка подключения: {e}")
-        return None
-
-
-def load_local_data(path):
-    """Фоллбек: читаем из локального .json файла."""
+def load_local_data(path: str) -> dict:
+    """Синхронный фоллбек — читает локальный JSON файл."""
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            print(f"load_local_data error ({path}): {e}")
+            print(f"[Local] load error ({path}): {e}")
     return {}
 
+def _save_local(data: dict, path: str):
+    """Синхронная запись локального JSON (резерв)."""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"[Local] save error ({path}): {e}")
+
+async def _get_db_pool():
+    """Создаёт async-пул соединений aiomysql с SSL (обязателен для Aiven)."""
+    if not aiomysql or not DB_HOST:
+        return None
+    try:
+        pool = await aiomysql.create_pool(
+            host=DB_HOST,
+            port=DB_PORT,           # int — обязательно!
+            user=DB_USER,
+            password=DB_PASSWORD,
+            db=DB_NAME,             # defaultdb на Aiven
+            ssl={"ssl_disabled": False},  # SSL обязателен для Aiven!
+            charset="utf8mb4",
+            autocommit=True,
+            connect_timeout=10,
+            minsize=1,
+            maxsize=3,
+        )
+        return pool
+    except Exception as e:
+        print(f"[MySQL] pool error: {e}")
+        return None
+
+# Глобальный пул соединений (инициализируется при старте)
+_DB_POOL = None
+
+async def _init_db_pool():
+    """Инициализирует глобальный пул и создаёт 4 таблицы если не существуют."""
+    global _DB_POOL
+    _DB_POOL = await _get_db_pool()
+    if _DB_POOL is None:
+        print("[MySQL] Пул не создан — работаем без MySQL")
+        return
+
+    # Единая схема для всех 4 разделов:
+    # data_key = 'main' (одна строка на таблицу, всё хранится как JSON)
+    create_sql = """
+        CREATE TABLE IF NOT EXISTS `{table}` (
+            id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            data_key   VARCHAR(64)  NOT NULL UNIQUE COMMENT 'Всегда main',
+            data_json  MEDIUMTEXT   NOT NULL        COMMENT 'Данные в JSON',
+            updated_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+                       ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='{comment}'
+    """
+    table_comments = {
+        "chats":       "Чаты — беседы, настройки, стафф, статистика, муты, фильтры",
+        "economy":     "Экономика — деньги, банк, пиво, мини-игры",
+        "punishments": "Наказания — глобальные блокировки, локальные баны, муты, варны",
+        "staff":       "Руководство — гстаф, тестировщики, тех.специалисты, будущие роли",
+    }
+    try:
+        async with _DB_POOL.acquire() as conn:
+            async with conn.cursor() as cur:
+                for table, comment in table_comments.items():
+                    await cur.execute(create_sql.format(table=table, comment=comment))
+        print("[MySQL] Таблицы готовы: chats, economy, punishments, staff")
+    except Exception as e:
+        print(f"[MySQL] create tables error: {e}")
 
 async def load_from_github(gh_path: str, local_path: str) -> dict:
-    """
-    Загружает данные.
-    Приоритет: MySQL → GitHub (резерв, если MySQL недоступен).
-    """
+    """Загружает данные из MySQL. Фоллбек — локальный файл."""
     table = _TABLE_MAP.get(gh_path)
-    if table:
-        conn = _get_db_conn()
-        if conn:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(f"SELECT data_json FROM {table} WHERE data_key='main' LIMIT 1")
-                    row = cur.fetchone()
+    if table and _DB_POOL:
+        try:
+            async with _DB_POOL.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(
+                        f"SELECT data_json FROM `{table}` WHERE data_key='main' LIMIT 1"
+                    )
+                    row = await cur.fetchone()
                     if row:
                         return json.loads(row["data_json"])
-            except Exception as e:
-                print(f"[MySQL] load {table}: {e}")
-            finally:
-                conn.close()
-
-    # Фоллбек: GitHub
-    if GH_TOKEN and GH_REPO:
-        url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
-        headers = {"Authorization": f"token {GH_TOKEN}"}
-        timeout = aiohttp.ClientTimeout(total=15)
-        try:
-            async with aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(ssl=False),
-                timeout=timeout
-            ) as session:
-                async with session.get(url, headers=headers) as resp:
-                    if resp.status == 200:
-                        doc = await resp.json()
-                        if "content" in doc:
-                            data = json.loads(base64.b64decode(doc["content"]).decode("utf-8"))
-                            with open(local_path, "w", encoding="utf-8") as f:
-                                json.dump(data, f, ensure_ascii=False, indent=4)
-                            return data
         except Exception as e:
-            print(f"[GitHub] load {gh_path}: {e}")
-
+            print(f"[MySQL] load {table}: {e}")
     return load_local_data(local_path)
 
-
 async def push_to_github(data: dict, gh_path: str, local_path: str):
-    """
-    Сохраняет данные.
-    Основное: MySQL. Запасное: GitHub (если MySQL недоступен).
-    """
-    # 1. MySQL — основное хранилище
+    """Сохраняет данные в MySQL. Фоллбек — локальный файл."""
     table = _TABLE_MAP.get(gh_path)
-    if table:
-        conn = _get_db_conn()
-        if conn:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"""INSERT INTO {table} (data_key, data_json)
+    if table and _DB_POOL:
+        try:
+            async with _DB_POOL.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        f"""INSERT INTO `{table}` (data_key, data_json)
                             VALUES ('main', %s)
                             ON DUPLICATE KEY UPDATE data_json = VALUES(data_json)""",
                         (json.dumps(data, ensure_ascii=False),)
                     )
-                return  # успешно сохранено в MySQL
-            except Exception as e:
-                print(f"[MySQL] push {table}: {e}")
-            finally:
-                conn.close()
-
-    # 2. Фоллбек: GitHub
-    if GH_TOKEN and GH_REPO:
-        url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
-        headers = {"Authorization": f"token {GH_TOKEN}", "Content-Type": "application/json"}
-        encoded = base64.b64encode(
-            json.dumps(data, ensure_ascii=False, indent=4).encode("utf-8")
-        ).decode("utf-8")
-        timeout = aiohttp.ClientTimeout(total=15)
-        try:
-            async with aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(ssl=False),
-                timeout=timeout
-            ) as session:
-                async with session.get(url, headers=headers) as r:
-                    sha = (await r.json()).get("sha", "") if r.status == 200 else ""
-                payload = json.dumps({"message": "update", "content": encoded, "sha": sha})
-                async with session.put(url, headers=headers, data=payload):
-                    pass
+            return
         except Exception as e:
-            print(f"[GitHub] push {gh_path}: {e}")
-
-    # 3. Локальный файл (последний резерв)
-    try:
-        with open(local_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"[Local] push {local_path}: {e}")
+            print(f"[MySQL] push {table}: {e}")
+    _save_local(data, local_path)
 
 
 # ────────────────────────────────────────────────
 # Кэш имён пользователей — избегаем лишних API вызовов
-# ────────────────────────────────────────────────
-USER_NAMES_CACHE: dict = {}  # {user_id: "Имя Фамилия"}
-
 
 # ────────────────────────────────────────────────
 # Альтернативные префиксы и алиасы команд (/alt)
@@ -446,79 +404,28 @@ class H(BaseHTTPRequestHandler):
         pass
 
 # ────────────────────────────────────────────────
-# Загрузка / сохранение данных
+# Инициализация данных (синхронная загрузка при старте)
 # ────────────────────────────────────────────────
-async def load_from_github(gh_path, local_path):
-    if not GH_TOKEN or not GH_REPO:
-        return load_local_data(local_path)
-    url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
-    headers = {"Authorization": f"token {GH_TOKEN}"}
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False),
-                                     timeout=aiohttp.ClientTimeout(total=15)) as session:
-        async with session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                doc = await resp.json()
-                if "content" in doc:
-                    data = json.loads(base64.b64decode(doc["content"]).decode("utf-8"))
-                    with open(local_path, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=4)
-                    return data
-            if resp.status != 404:
-                print(f"GitHub load failed: {resp.status}")
-    return load_local_data(local_path)
+async def _startup_load():
+    """Инициализирует пул MySQL и загружает все данные."""
+    await _init_db_pool()
+    db   = await load_from_github(GH_PATH_DB,    EXTERNAL_DB)
+    eco  = await load_from_github(GH_PATH_ECO,   EXTERNAL_ECO)
+    pun  = await load_from_github(GH_PATH_PUN,   EXTERNAL_PUN)
+    stf  = await load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF)
+    return db, eco, pun, stf
 
-def load_local_data(path):
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print("Local load error:", e)
-            return {}
-    return {}
+_startup_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(_startup_loop)
+_db, _eco, _pun, _stf = _startup_loop.run_until_complete(_startup_load())
 
-async def push_to_github(data, gh_path, local_path):
-    if not GH_TOKEN or not GH_REPO:
-        try:
-            with open(local_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            print("Local save error:", e)
-        return
-    url = f"https://api.github.com/repos/{GH_REPO}/contents/{gh_path}"
-    headers = {"Authorization": f"token {GH_TOKEN}"}
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-        sha = None
-        async with session.get(url, headers=headers) as r:
-            if r.status == 200:
-                doc = await r.json()
-                sha = doc.get("sha")
-        content = base64.b64encode(
-            json.dumps(data, ensure_ascii=False, indent=4).encode("utf-8")
-        ).decode("utf-8")
-        payload = {"message": "Update from bot", "content": content}
-        if sha:
-            payload["sha"] = sha
-        async with session.put(url, headers=headers, json=payload) as resp:
-            if resp.status not in (200, 201):
-                print("GitHub push failed:", resp.status, await resp.text())
-        with open(local_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+DATABASE    = _db    if isinstance(_db,  dict) else {}
+ECONOMY     = _eco   if isinstance(_eco, dict) else {}
+PUNISHMENTS = _pun   if isinstance(_pun, dict) else {}
+STAFF       = _stf   if isinstance(_stf, dict) else {}
 
-# ────────────────────────────────────────────────
-# Инициализация данных
-# ────────────────────────────────────────────────
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-DATABASE    = loop.run_until_complete(load_from_github(GH_PATH_DB,    EXTERNAL_DB))
-ECONOMY     = loop.run_until_complete(load_from_github(GH_PATH_ECO,   EXTERNAL_ECO))
-PUNISHMENTS = loop.run_until_complete(load_from_github(GH_PATH_PUN,   EXTERNAL_PUN))
-STAFF       = loop.run_until_complete(load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF))
-
-if not isinstance(DATABASE,    dict): DATABASE    = {}
-if not isinstance(ECONOMY,     dict): ECONOMY     = {}
-if not isinstance(PUNISHMENTS, dict): PUNISHMENTS = {}
-if not isinstance(STAFF,       dict): STAFF       = {}
+# Передаём loop боту (vkbottle использует тот же loop)
+asyncio.set_event_loop(_startup_loop)
 
 for key in ("gbans_status", "gbans_pl", "bans", "warns"):
     if key not in PUNISHMENTS:
