@@ -3833,7 +3833,7 @@ if __name__ == "__main__":
         target=HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), H).serve_forever,
         daemon=True
     ).start()
-    _startup_loop.create_task(send_reports())
-    _startup_loop.create_task(keep_alive())
+    loop.create_task(send_reports())
+    loop.create_task(keep_alive())
     print("Бот запущен. Keep-alive и тех.отчёты активны.")
     bot.run_forever()
