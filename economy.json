@@ -127,10 +127,10 @@
         "last": 1774961260.701757,
         "duel_losses": 246,
         "pivo": {
-            "total": 17.3,
-            "last": 1775100782.2216623,
+            "total": 20.0,
+            "last": 1775132703.8791206,
             "month": "2026-04",
-            "month_total": 3.7
+            "month_total": 6.4
         },
         "duel_wins": 56
     },
