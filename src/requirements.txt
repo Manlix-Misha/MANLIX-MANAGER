@@ -1,3 +1,4 @@
 vkbottle
 sqlalchemy
 asyncpg
+aiomysql
