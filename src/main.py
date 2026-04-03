@@ -7,10 +7,6 @@ try:
     import aiomysql
 except ImportError:
     aiomysql = None
-try:
-    import aiohttp
-except ImportError:
-    aiohttp = None
 import random
 import asyncio
 import time
@@ -129,7 +125,6 @@ ALT_ALIASES: dict = {
     "filter":        ["фильтр"],
     "server":        ["сервер"],
     "serverinfo":    ["серверинфо"],
-    "tex":           ["тех"],
 }
 
 # Обратный словарь: алиас → каноническая команда
@@ -303,13 +298,6 @@ async def _init_db_pool():
         STAFF["testers"] = {}
     if "texstaff" not in STAFF:
         STAFF["texstaff"] = {}
-    
-    # Сохраняем инициализированные данные обратно в MySQL
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
-    print("[MySQL] Инициализированные данные сохранены в БД")
 
 async def load_from_github(gh_path: str, local_path: str) -> dict:
     """Загружает данные из MySQL. Фоллбек — локальный файл."""
@@ -3331,38 +3319,9 @@ async def filterlist_cmd(m: Message):
     await m.answer(msg.strip())
 
 
-# ────────────────────────────────────────
-# /tex — команда управления техническими беседами
-# ────────────────────────────────────────
-@bot.on.message(text=["/tex", "/tex <args>"])
-async def tex_cmd(m: Message, args=None):
-    """Команда для управления техническими беседами — только СР."""
-    if not await check_access(m, "Специальный Руководитель"): return
-    pid = str(m.peer_id)
-    ensure_chat(pid)
-    if not args or not args.strip():
-        current_type = DATABASE['chats'][pid].get('type', 'def')
-        return await m.answer(
-            f"Тип текущей беседы: {current_type}\n\n"
-            "Использование: /tex on (включить тех.отчеты)\n"
-            "Использование: /tex off (выключить тех.отчеты)"
-        )
-    subcmd = args.strip().lower()
-    if subcmd == "on":
-        DATABASE["chats"][pid]["type"] = "tex"
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer("Режим технической беседы активирован. Технические отчеты будут приходить каждые 15 секунд.")
-    elif subcmd == "off":
-        DATABASE["chats"][pid]["type"] = "def"
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer("Режим технической беседы отключен. Технические отчеты больше не будут приходить.")
-    else:
-        await m.answer("Неверная подкоманда. Используйте: /tex on или /tex off")
-
-
-# ────────────────────────────────────────
+# ────────────────────────────────────────────────
 # /clogs — скрытая команда управления chat logs
-# ────────────────────────────────────────
+# ────────────────────────────────────────────────
 @bot.on.message(text=["/clogs", "/clogs <args>"])
 async def clogs_cmd(m: Message, args=None):
     """Скрытая команда — только СР. Привязывает беседу-источник к clogs-беседе."""
@@ -3692,7 +3651,16 @@ async def actions(m: Message):
             except:
                 pass
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            # Бот добавлен в беседу, приветствие отключено
+            await bot.api.messages.send(
+                peer_id=m.peer_id,
+                message=(
+                    "Привет! Я MANLIX MANAGER.\n\n"
+                    "Выдайте мне права администратора, затем введите:\n"
+                    "/start — активировать беседу\n"
+                    "/type — выбрать тип беседы"
+                ),
+                random_id=int(time.time() * 1000) % (2**31)
+            )
             return
 
         uid = str(invited)
@@ -3745,82 +3713,58 @@ async def actions(m: Message):
 # Технические отчёты
 # ────────────────────────────────────────────────
 async def send_reports():
-    print("[DEBUG] Функция send_reports запущена")
+    """
+    Технические отчёты ровно в :00, :15, :30, :45 каждой минуты.
+    Алгоритм: вычисляем точное время до следующего кратного 15 — нет дрейфа.
+    """
+    print("[send_reports] Запущен")
     while True:
-        now = datetime.datetime.now(TZ_MSK)
-        current_second = now.second
-        
-        # Проверяем каждые 15 секунд (0, 15, 30, 45)
-        if current_second % 15 == 0:
-            print(f"[DEBUG] Проверяем тех.отчеты в {now.strftime('%H:%M:%S')}")
-            chats_count = 0
-            tex_count = 0
-            
-            # Создаем копию данных чтобы избежать изменений во время итерации
-            chats_data = DATABASE.get("chats", {}).copy()
-            
-            for pid, chat in chats_data.items():
-                chats_count += 1
-                chat_type = chat.get("type")
-                print(f"[DEBUG] Беседа {pid} имеет тип: {chat_type}")
-                
-                if chat_type == "tex":
-                    tex_count += 1
-                    delay    = round(random.uniform(0, 1), 2)
-                    time_str = now.strftime("%H:%M:%S")
-                    date_str = now.strftime("%d/%m/%Y")
-                    msg = (
-                        f"…::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::…\n\n"
-                        f"| ==> Бот успешно работает.\n"
-                        f"| Задержка Бота: {delay}\n"
-                        f"| Точное время: {time_str}\n"
-                        f"| Дата: {date_str}"
-                    )
-                    try:
-                        await bot.api.messages.send(
-                            peer_id=int(pid),
-                            message=msg,
-                            random_id=random.randint(0, 2**32 - 1)
-                        )
-                        print(f"[DEBUG] Отчет отправлен в беседу {pid}")
-                    except Exception as e:
-                        print(f"[DEBUG] Ошибка отправки в беседу {pid}: {e}")
-            
-            print(f"[DEBUG] Всего бесед: {chats_count}, с типом 'tex': {tex_count}")
-        
-        # Ждем до следующей проверки, но синхронизируемся с началом секунды
-        await asyncio.sleep(1)
+        now_ts  = time.time()
+        sleep_s = 15.0 - (now_ts % 15.0)
+        await asyncio.sleep(sleep_s)
 
+        now = datetime.datetime.now(TZ_MSK)
+        chats_snapshot = list(DATABASE.get("chats", {}).items())
+        for pid, chat in chats_snapshot:
+            if chat.get("type") == "tex":
+                delay    = round(random.uniform(0, 1), 2)
+                time_str = now.strftime("%H:%M:%S")
+                date_str = now.strftime("%d/%m/%Y")
+                msg = (
+                    f"…::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::…\n\n"
+                    f"| ==> Бот успешно работает.\n"
+                    f"| Задержка Бота: {delay}\n"
+                    f"| Точное время: {time_str}\n"
+                    f"| Дата: {date_str}"
+                )
+                try:
+                    await bot.api.messages.send(
+                        peer_id=int(pid),
+                        message=msg,
+                        random_id=random.randint(0, 2**31)
+                    )
+                except Exception as e:
+                    print(f"[send_reports] error pid={pid}: {e}")
 # ────────────────────────────────────────────────
 # Keep-Alive
 # ────────────────────────────────────────────────
 async def keep_alive():
+    """Keep-alive пинг каждые 10 минут — через urllib, без aiohttp."""
+    import urllib.request as _urllib_req
     while True:
-        try:
-            url = os.environ.get("RENDER_EXTERNAL_URL")
-            if url:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        url + "?keepalive=1",
-                        timeout=aiohttp.ClientTimeout(total=10)
-                    ):
-                        print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive отправлен")
-        except Exception as e:
-            print("Keep-alive error:", e)
         await asyncio.sleep(600)
-
-# ────────────────────────────────────────────────
-# Запуск
-# ────────────────────────────────────────────────
+        try:
+            url = os.environ.get("RENDER_EXTERNAL_URL", "")
+            if url:
+                _urllib_req.urlopen(url + "?keepalive=1", timeout=10)
+                print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive OK")
+        except Exception as e:
+            print(f"[keep_alive] error: {e}")
 async def _startup():
     """Инициализация: создаём пул MySQL и запускаем фоновые задачи."""
-    print("[DEBUG] Начинаем инициализацию...")
     await _init_db_pool()
-    print("[DEBUG] База данных инициализирована")
     loop = asyncio.get_event_loop()
-    print("[DEBUG] Создаем задачу send_reports...")
     loop.create_task(send_reports())
-    print("[DEBUG] Создаем задачу keep_alive...")
     loop.create_task(keep_alive())
     print("Бот запущен. Keep-alive и тех.отчёты активны.")
 
