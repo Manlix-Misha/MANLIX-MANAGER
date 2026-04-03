@@ -3715,11 +3715,17 @@ async def actions(m: Message):
 # Технические отчёты
 # ────────────────────────────────────────────────
 async def send_reports():
+    print("[DEBUG] Функция send_reports запущена")
     while True:
         now = datetime.datetime.now(TZ_MSK)
         if now.second % 15 == 0:  # Отправляем отчет каждые 15 секунд
+            print(f"[DEBUG] Проверяем тех.отчеты в {now.strftime('%H:%M:%S')}")
+            chats_count = 0
+            tex_count = 0
             for pid, chat in list(DATABASE.get("chats", {}).items()):
+                chats_count += 1
                 if chat.get("type") == "tex":
+                    tex_count += 1
                     delay    = round(random.uniform(0, 1), 2)
                     time_str = now.strftime("%H:%M:%S")
                     date_str = now.strftime("%d/%m/%Y")
@@ -3736,8 +3742,10 @@ async def send_reports():
                             message=msg,
                             random_id=random.randint(0, 2**32 - 1)
                         )
+                        print(f"[DEBUG] Отчет отправлен в беседу {pid}")
                     except Exception as e:
                         print("send_reports error:", e)
+            print(f"[DEBUG] Всего бесед: {chats_count}, с типом 'tex': {tex_count}")
         await asyncio.sleep(1)
 
 # ────────────────────────────────────────────────
@@ -3763,9 +3771,13 @@ async def keep_alive():
 # ────────────────────────────────────────────────
 async def _startup():
     """Инициализация: создаём пул MySQL и запускаем фоновые задачи."""
+    print("[DEBUG] Начинаем инициализацию...")
     await _init_db_pool()
+    print("[DEBUG] База данных инициализирована")
     loop = asyncio.get_event_loop()
+    print("[DEBUG] Создаем задачу send_reports...")
     loop.create_task(send_reports())
+    print("[DEBUG] Создаем задачу keep_alive...")
     loop.create_task(keep_alive())
     print("Бот запущен. Keep-alive и тех.отчёты активны.")
 
