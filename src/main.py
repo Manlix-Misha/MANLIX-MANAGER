@@ -276,10 +276,10 @@ async def _init_db_pool():
     eco = await load_from_github(GH_PATH_ECO,   EXTERNAL_ECO)
     pun = await load_from_github(GH_PATH_PUN,   EXTERNAL_PUN)
     stf = await load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF)
-    if isinstance(db,  dict) and db:  DATABASE    = db
-    if isinstance(eco, dict) and eco: ECONOMY     = eco
-    if isinstance(pun, dict) and pun: PUNISHMENTS = pun
-    if isinstance(stf, dict) and stf: STAFF       = stf
+    if isinstance(db,  dict): DATABASE    = db
+    if isinstance(eco, dict): ECONOMY     = eco
+    if isinstance(pun, dict): PUNISHMENTS = pun
+    if isinstance(stf, dict): STAFF       = stf
     print("[MySQL] Данные загружены из БД")
 
     # Инициализация структуры данных (добавляем недостающие ключи)
@@ -647,10 +647,6 @@ class ChatMiddleware(BaseMiddleware[Message]):
             return
         if not getattr(self.event, "from_id", None) or self.event.from_id < 0:
             return
-        # Защита от обработки сообщений до завершения инициализации БД
-        if not DATABASE or "chats" not in DATABASE:
-            self.stop()
-            return
         from_id = self.event.from_id
         pid = str(self.event.peer_id)
         uid = str(from_id)
@@ -760,6 +756,7 @@ class ChatMiddleware(BaseMiddleware[Message]):
                     kb_filter = Keyboard(inline=True)
                     kb_filter.row()
                     kb_filter.add(Callback("Снять мут", {"cmd": "unmute_btn", "uid": uid}), color=KeyboardButtonColor.POSITIVE)
+                    user_display = await get_display_name(from_id, peer_id=self.event.peer_id)
                     try:
                         await bot.api.messages.send(
                             peer_id=peer_filter,
