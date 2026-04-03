@@ -129,6 +129,7 @@ ALT_ALIASES: dict = {
     "filter":        ["фильтр"],
     "server":        ["сервер"],
     "serverinfo":    ["серверинфо"],
+    "tex":           ["тех"],
 }
 
 # Обратный словарь: алиас → каноническая команда
@@ -3330,9 +3331,38 @@ async def filterlist_cmd(m: Message):
     await m.answer(msg.strip())
 
 
-# ────────────────────────────────────────────────
+# ────────────────────────────────────────
+# /tex — команда управления техническими беседами
+# ────────────────────────────────────────
+@bot.on.message(text=["/tex", "/tex <args>"])
+async def tex_cmd(m: Message, args=None):
+    """Команда для управления техническими беседами — только СР."""
+    if not await check_access(m, "Специальный Руководитель"): return
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    if not args or not args.strip():
+        current_type = DATABASE['chats'][pid].get('type', 'def')
+        return await m.answer(
+            f"Тип текущей беседы: {current_type}\n\n"
+            "Использование: /tex on (включить тех.отчеты)\n"
+            "Использование: /tex off (выключить тех.отчеты)"
+        )
+    subcmd = args.strip().lower()
+    if subcmd == "on":
+        DATABASE["chats"][pid]["type"] = "tex"
+        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        await m.answer("Режим технической беседы активирован. Технические отчеты будут приходить каждые 15 секунд.")
+    elif subcmd == "off":
+        DATABASE["chats"][pid]["type"] = "def"
+        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+        await m.answer("Режим технической беседы отключен. Технические отчеты больше не будут приходить.")
+    else:
+        await m.answer("Неверная подкоманда. Используйте: /tex on или /tex off")
+
+
+# ────────────────────────────────────────
 # /clogs — скрытая команда управления chat logs
-# ────────────────────────────────────────────────
+# ────────────────────────────────────────
 @bot.on.message(text=["/clogs", "/clogs <args>"])
 async def clogs_cmd(m: Message, args=None):
     """Скрытая команда — только СР. Привязывает беседу-источник к clogs-беседе."""
