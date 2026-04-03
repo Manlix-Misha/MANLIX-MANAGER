@@ -7,6 +7,10 @@ try:
     import aiomysql
 except ImportError:
     aiomysql = None
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 import random
 import asyncio
 import time
@@ -3658,16 +3662,7 @@ async def actions(m: Message):
             except:
                 pass
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            await bot.api.messages.send(
-                peer_id=m.peer_id,
-                message=(
-                    "Привет! Я MANLIX MANAGER.\n\n"
-                    "Выдайте мне права администратора, затем введите:\n"
-                    "/start — активировать беседу\n"
-                    "/type — выбрать тип беседы"
-                ),
-                random_id=int(time.time() * 1000) % (2**31)
-            )
+            # Бот добавлен в беседу, приветствие отключено
             return
 
         uid = str(invited)
@@ -3722,7 +3717,7 @@ async def actions(m: Message):
 async def send_reports():
     while True:
         now = datetime.datetime.now(TZ_MSK)
-        if now.second % 60 == 0:  # Отправляем отчет каждую минуту
+        if now.second % 15 == 0:  # Отправляем отчет каждые 15 секунд
             for pid, chat in list(DATABASE.get("chats", {}).items()):
                 if chat.get("type") == "tex":
                     delay    = round(random.uniform(0, 1), 2)
