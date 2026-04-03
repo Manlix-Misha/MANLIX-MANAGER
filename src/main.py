@@ -298,6 +298,13 @@ async def _init_db_pool():
         STAFF["testers"] = {}
     if "texstaff" not in STAFF:
         STAFF["texstaff"] = {}
+    
+    # Сохраняем инициализированные данные обратно в MySQL
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
+    print("[MySQL] Инициализированные данные сохранены в БД")
 
 async def load_from_github(gh_path: str, local_path: str) -> dict:
     """Загружает данные из MySQL. Фоллбек — локальный файл."""
@@ -3715,7 +3722,7 @@ async def actions(m: Message):
 async def send_reports():
     while True:
         now = datetime.datetime.now(TZ_MSK)
-        if now.second % 15 == 0:
+        if now.second % 60 == 0:  # Отправляем отчет каждую минуту
             for pid, chat in list(DATABASE.get("chats", {}).items()):
                 if chat.get("type") == "tex":
                     delay    = round(random.uniform(0, 1), 2)
