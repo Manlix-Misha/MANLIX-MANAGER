@@ -3718,13 +3718,23 @@ async def send_reports():
     print("[DEBUG] Функция send_reports запущена")
     while True:
         now = datetime.datetime.now(TZ_MSK)
-        if now.second % 15 == 0:  # Отправляем отчет каждые 15 секунд
+        current_second = now.second
+        
+        # Проверяем каждые 15 секунд (0, 15, 30, 45)
+        if current_second % 15 == 0:
             print(f"[DEBUG] Проверяем тех.отчеты в {now.strftime('%H:%M:%S')}")
             chats_count = 0
             tex_count = 0
-            for pid, chat in list(DATABASE.get("chats", {}).items()):
+            
+            # Создаем копию данных чтобы избежать изменений во время итерации
+            chats_data = DATABASE.get("chats", {}).copy()
+            
+            for pid, chat in chats_data.items():
                 chats_count += 1
-                if chat.get("type") == "tex":
+                chat_type = chat.get("type")
+                print(f"[DEBUG] Беседа {pid} имеет тип: {chat_type}")
+                
+                if chat_type == "tex":
                     tex_count += 1
                     delay    = round(random.uniform(0, 1), 2)
                     time_str = now.strftime("%H:%M:%S")
@@ -3744,8 +3754,11 @@ async def send_reports():
                         )
                         print(f"[DEBUG] Отчет отправлен в беседу {pid}")
                     except Exception as e:
-                        print("send_reports error:", e)
+                        print(f"[DEBUG] Ошибка отправки в беседу {pid}: {e}")
+            
             print(f"[DEBUG] Всего бесед: {chats_count}, с типом 'tex': {tex_count}")
+        
+        # Ждем до следующей проверки, но синхронизируемся с началом секунды
         await asyncio.sleep(1)
 
 # ────────────────────────────────────────────────
