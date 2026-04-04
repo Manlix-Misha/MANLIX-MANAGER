@@ -3766,22 +3766,30 @@ async def keep_alive():
                         print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive → {resp.status}")
         except Exception as e:
             print(f"[keep_alive] error: {e}")
-async def _startup():
-    """
-    Инициализация БД + фоновые задачи.
-    asyncio.run() гарантирует что loop активен при create_task.
-    """
+async def _init_bot():
+    """Инициализация БД. Вызывается через loop.run_until_complete()."""
     await _init_db_pool()
-    # Задачи создаются при активном loop — работают гарантированно
-    asyncio.create_task(send_reports())
-    asyncio.create_task(keep_alive())
-    print("Бот запущен. send_reports и keep_alive активны.")
-    await bot.run_polling()
-
+    print("Инициализация завершена. Запуск бота...")
 
 if __name__ == "__main__":
+    # HTTP keep-alive сервер в отдельном потоке
     threading.Thread(
         target=HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), H).serve_forever,
         daemon=True
     ).start()
-    asyncio.run(_startup())
+
+    # Единый event loop на всё время работы бота
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # 1. Инициализируем БД в этом loop (aiomysql пул привязан к нему)
+    loop.run_until_complete(_init_bot())
+
+    # 2. Создаём фоновые задачи (pending до запуска loop.run_forever)
+    loop.create_task(send_reports())
+    loop.create_task(keep_alive())
+
+    # 3. Запускаем бота — bot.run_forever() вызывает loop.run_forever()
+    #    Тот же loop → aiomysql пул работает, задачи выполняются
+    print("Бот запущен. send_reports и keep_alive активны.")
+    bot.run_forever()
