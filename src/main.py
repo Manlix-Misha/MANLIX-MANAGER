@@ -7,10 +7,6 @@ try:
     import aiomysql
 except ImportError:
     aiomysql = None
-try:
-    import aiohttp
-except ImportError:
-    aiohttp = None
 import random
 import asyncio
 import time
@@ -129,7 +125,6 @@ ALT_ALIASES: dict = {
     "filter":        ["фильтр"],
     "server":        ["сервер"],
     "serverinfo":    ["серверинфо"],
-    "tex":           ["тех"],
 }
 
 # Обратный словарь: алиас → каноническая команда
@@ -303,13 +298,6 @@ async def _init_db_pool():
         STAFF["testers"] = {}
     if "texstaff" not in STAFF:
         STAFF["texstaff"] = {}
-    
-    # Сохраняем инициализированные данные обратно в MySQL
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
-    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
-    print("[MySQL] Инициализированные данные сохранены в БД")
 
 async def load_from_github(gh_path: str, local_path: str) -> dict:
     """Загружает данные из MySQL. Фоллбек — локальный файл."""
@@ -649,66 +637,6 @@ async def set_role_in_chat(pid: str, uid: str, role_name: str, replace: bool = F
         top  = highest_role(existing)
         rest = [r for r in existing if r != top]
         DATABASE["chats"][pid]["staff"][uid] = [top, nick, rest]
-
-def get_tester_info(user_id: int):
-    """Возвращает (роль_тестировщика, кол-во_багов) или (None, 0)."""
-    uid = str(user_id)
-    entry = STAFF.get("testers", {}).get(uid)
-    if entry:
-        return entry.get("role"), entry.get("bugs", 0)
-    return None, 0
-
-def get_texspec_info(user_id: int):
-    """Возвращает роль технического специалиста или None."""
-    uid = str(user_id)
-    entry = STAFF.get("texstaff", {}).get(uid)
-    if entry:
-        return entry.get("role", "Технический Специалист")
-    return None
-
-def can_tex(user_id: int, peer_id, min_tex_role: str = "Технический Специалист") -> bool:
-    """Проверяет доступ: тех. специалист нужного уровня ИЛИ глобальный ранг >= ЗСР."""
-    tex_role = get_texspec_info(user_id)
-    global_role, _ = get_user_info(peer_id, user_id)
-    return (
-        TEX_RANK_WEIGHT.get(tex_role, 0) >= TEX_RANK_WEIGHT.get(min_tex_role, 0)
-        or RANK_WEIGHT.get(global_role, 0) >= 8
-    )
-
-async def send_log(peer_id: int, admin_id: int, action: str, target_id=None, reason=None, new_nick=None, mute_until=None):
-    """Отправляет лог действия в лог-чат."""
-    for log_pid, log_chat in DATABASE.get("chats", {}).items():
-        if log_chat.get("type") == "logs":
-            try:
-                admin_display = await get_display_name(admin_id, peer_id=peer_id)
-                msg = f"📋 Лог действия:\n\n"
-                msg += f"Действие: {action}\n"
-                msg += f"Администратор: [id{admin_id}|{admin_display}]\n"
-                msg += f"VK ID администратора: {admin_id}\n"
-                
-                if target_id:
-                    target_display = await get_display_name(target_id, peer_id=peer_id)
-                    msg += f"Пользователь: [id{target_id}|{target_display}]\n"
-                    msg += f"VK ID пользователя: {target_id}\n"
-                
-                if reason:
-                    msg += f"Причина: {reason}\n"
-                
-                if new_nick:
-                    msg += f"Новый ник: {new_nick}\n"
-                
-                if mute_until:
-                    msg += f"Мут до: {mute_until}\n"
-                
-                msg += f"\nВремя: {datetime.datetime.now(TZ_MSK).strftime('%d/%m/%Y %H:%M:%S')}"
-                
-                await bot.api.messages.send(
-                    peer_id=int(log_pid),
-                    message=msg,
-                    random_id=random.randint(0, 2**31)
-                )
-            except Exception as e:
-                print(f"send_log error to {log_pid}: {e}")
 
 # ────────────────────────────────────────────────
 # Middleware
@@ -2144,18 +2072,14 @@ async def typetex_cmd(m: Message, args=None):
                     return await m.answer("Укажите айди беседы для clogs. Пример: /typetex clogs 2000000001")
                 DATABASE["chats"][pid]["type"] = "clogs"
                 DATABASE["chats"][pid]["clogs_source"] = source_id
-                await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-                await m.answer(f"Технический тип Беседы изменён на: clogs (источник: {source_id})")
             else:
                 DATABASE["chats"][pid]["type"] = new_type
-                await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-                print(f"[DEBUG] Тип беседы {pid} изменен на {new_type}")
-                print(f"[DEBUG] Текущий тип в DATABASE: {DATABASE['chats'][pid].get('type')}")
-                await m.answer(f"Технический тип Беседы изменён на: {new_type}")
+            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+            await m.answer(f"Технический тип Беседы изменён на: {new_type}")
             return
         else:
             await m.answer("Неверный тип. Доступные технические типы смотри ниже.")
-    current = DATABASE["chats"][pid].get("type", "def")
+    current = DATABASE["chats"][pid]["type"]
     await m.answer(
         f"Беседа имеет тип: {current}\n\n"
         "tex - Тех. Раздел\n"
@@ -2405,6 +2329,31 @@ async def gunbanpl_cmd(m: Message, args=None):
 # ────────────────────────────────────────────────
 # Система тестировщиков
 # ────────────────────────────────────────────────
+
+def get_tester_info(user_id: int):
+    """Возвращает (роль_тестировщика, кол-во_багов) или (None, 0)."""
+    uid = str(user_id)
+    entry = STAFF.get("testers", {}).get(uid)
+    if entry:
+        return entry.get("role"), entry.get("bugs", 0)
+    return None, 0
+
+def get_texspec_info(user_id: int):
+    """Возвращает роль технического специалиста или None."""
+    uid = str(user_id)
+    entry = STAFF.get("texstaff", {}).get(uid)
+    if entry:
+        return entry.get("role", "Технический Специалист")
+    return None
+
+def can_tex(user_id: int, peer_id, min_tex_role: str = "Технический Специалист") -> bool:
+    """Проверяет доступ: тех. специалист нужного уровня ИЛИ глобальный ранг >= ЗСР."""
+    tex_role = get_texspec_info(user_id)
+    global_role, _ = get_user_info(peer_id, user_id)
+    return (
+        TEX_RANK_WEIGHT.get(tex_role, 0) >= TEX_RANK_WEIGHT.get(min_tex_role, 0)
+        or RANK_WEIGHT.get(global_role, 0) >= 8
+    )
 
 async def tester_role_grant(m: Message, args, min_tester_role, role_name, role_label):
     """Выдача ролей тестировщиков."""
@@ -2930,16 +2879,16 @@ async def reset_money_cmd(m: Message, args=None):
     ECONOMY[uid]["cash"] = 0
     ECONOMY[uid]["bank"] = 0
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display    = await get_display_name(t, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(
-        f"[id{m.from_id}|{spec_display}] обнулил Баланс [id{t}|{t_display}]"
+        f"[id{m.from_id}|{a_display}] обнулил Баланс [id{t}|{t_display}]"
     )
     # Второе сообщение — отчёт о действии
     now = datetime.datetime.now(TZ_MSK)
     await m.answer(
         f"Информация о действии ТС:\n\n"
-        f"| Тех. Специалист -- [id{m.from_id}|{spec_display}]\n"
+        f"| Тех. Специалист -- [id{m.from_id}|{a_display}]\n"
         f"| VK ID Тех. Специалиста: {m.from_id}\n\n"
         f"| Пользователь -- [id{t}|{t_display}]\n"
         f"| VK ID пользователя: {t}\n"
@@ -2966,11 +2915,11 @@ async def reset_chat_cmd(m: Message, args=None):
         target_pid = str(m.reply_message.peer_id)
     if not target_pid:
         return await m.answer("Укажите ID беседы. Пример: /reset_chat 2000000001")
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     if target_pid in DATABASE.get("chats", {}):
         del DATABASE["chats"][target_pid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await m.answer(f"[id{m.from_id}|{spec_display}] обнулил(-а) чат {target_pid}")
+    await m.answer(f"[id{m.from_id}|{a_display}] обнулил(-а) чат {target_pid}")
 
 @bot.on.message(text="/reset_chat_all")
 async def reset_chat_all_cmd(m: Message):
@@ -2984,10 +2933,10 @@ async def reset_chat_all_cmd(m: Message):
     if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
         return await m.answer("Недостаточно прав!")
     # Получаем имя ДО очистки — после DATABASE["chats"] будет пуст
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     DATABASE["chats"] = {}
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    await m.answer(f"[id{m.from_id}|{spec_display}] обнулил(-а) все чаты из Базы данных.")
+    await m.answer(f"[id{m.from_id}|{a_display}] обнулил(-а) все чаты из Базы данных.")
 
 @bot.on.message(text="/reset_economy")
 async def reset_economy_cmd(m: Message):
@@ -3001,10 +2950,10 @@ async def reset_economy_cmd(m: Message):
     if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
         return await m.answer("Недостаточно прав!")
     global ECONOMY
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     ECONOMY = {}
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(f"[id{m.from_id}|{spec_display}] обнулил(-а) экономику Бота.")
+    await m.answer(f"[id{m.from_id}|{a_display}] обнулил(-а) экономику Бота.")
 
 
 # ────────────────────────────────────────────────
@@ -3370,38 +3319,9 @@ async def filterlist_cmd(m: Message):
     await m.answer(msg.strip())
 
 
-# ────────────────────────────────────────
-# /tex — команда управления техническими беседами
-# ────────────────────────────────────────
-@bot.on.message(text=["/tex", "/tex <args>"])
-async def tex_cmd(m: Message, args=None):
-    """Команда для управления техническими беседами — только СР."""
-    if not await check_access(m, "Специальный Руководитель"): return
-    pid = str(m.peer_id)
-    ensure_chat(pid)
-    if not args or not args.strip():
-        current_type = DATABASE['chats'][pid].get('type', 'def')
-        return await m.answer(
-            f"Тип текущей беседы: {current_type}\n\n"
-            "Использование: /tex on (включить тех.отчеты)\n"
-            "Использование: /tex off (выключить тех.отчеты)"
-        )
-    subcmd = args.strip().lower()
-    if subcmd == "on":
-        DATABASE["chats"][pid]["type"] = "tex"
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer("Режим технической беседы активирован. Технические отчеты будут приходить каждые 15 секунд.")
-    elif subcmd == "off":
-        DATABASE["chats"][pid]["type"] = "def"
-        await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-        await m.answer("Режим технической беседы отключен. Технические отчеты больше не будут приходить.")
-    else:
-        await m.answer("Неверная подкоманда. Используйте: /tex on или /tex off")
-
-
-# ────────────────────────────────────────
+# ────────────────────────────────────────────────
 # /clogs — скрытая команда управления chat logs
-# ────────────────────────────────────────
+# ────────────────────────────────────────────────
 @bot.on.message(text=["/clogs", "/clogs <args>"])
 async def clogs_cmd(m: Message, args=None):
     """Скрытая команда — только СР. Привязывает беседу-источник к clogs-беседе."""
@@ -3731,7 +3651,16 @@ async def actions(m: Message):
             except:
                 pass
             await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            # Бот добавлен в беседу, приветствие отключено
+            await bot.api.messages.send(
+                peer_id=m.peer_id,
+                message=(
+                    "Привет! Я MANLIX MANAGER.\n\n"
+                    "Выдайте мне права администратора, затем введите:\n"
+                    "/start — активировать беседу\n"
+                    "/type — выбрать тип беседы"
+                ),
+                random_id=int(time.time() * 1000) % (2**31)
+            )
             return
 
         uid = str(invited)
@@ -3784,97 +3713,75 @@ async def actions(m: Message):
 # Технические отчёты
 # ────────────────────────────────────────────────
 async def send_reports():
-    print("[DEBUG] Функция send_reports запущена")
+    """
+    Технические отчёты ровно в :00, :15, :30, :45 каждой минуты.
+    Алгоритм: вычисляем точное время до следующего кратного 15 — нет дрейфа.
+    """
+    print("[send_reports] Запущен")
     while True:
-        now = datetime.datetime.now(TZ_MSK)
-        current_second = now.second
-        
-        # Проверяем каждые 15 секунд (0, 15, 30, 45)
-        if current_second % 15 == 0:
-            print(f"[DEBUG] Проверяем тех.отчеты в {now.strftime('%H:%M:%S')}")
-            chats_count = 0
-            tex_count = 0
-            
-            # Проверяем загружены ли данные
-            print(f"[DEBUG] DATABASE загружен: {bool(DATABASE)}")
-            print(f"[DEBUG] DATABASE ключи: {list(DATABASE.keys()) if DATABASE else 'None'}")
-            
-            # Создаем копию данных чтобы избежать изменений во время итерации
-            chats_data = DATABASE.get("chats", {}).copy()
-            print(f"[DEBUG] Найдено бесед: {len(chats_data)}")
-            
-            for pid, chat in chats_data.items():
-                chats_count += 1
-                chat_type = chat.get("type")
-                print(f"[DEBUG] Беседа {pid} имеет тип: {chat_type}")
-                
-                if chat_type == "tex":
-                    tex_count += 1
-                    delay    = round(random.uniform(0, 1), 2)
-                    time_str = now.strftime("%H:%M:%S")
-                    date_str = now.strftime("%d/%m/%Y")
-                    msg = (
-                        f"…::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::…\n\n"
-                        f"| ==> Бот успешно работает.\n"
-                        f"| Задержка Бота: {delay}\n"
-                        f"| Точное время: {time_str}\n"
-                        f"| Дата: {date_str}"
-                    )
-                    try:
-                        await bot.api.messages.send(
-                            peer_id=int(pid),
-                            message=msg,
-                            random_id=random.randint(0, 2**32 - 1)
-                        )
-                        print(f"[DEBUG] Отчет отправлен в беседу {pid}")
-                    except Exception as e:
-                        print(f"[DEBUG] Ошибка отправки в беседу {pid}: {e}")
-            
-            print(f"[DEBUG] Всего бесед: {chats_count}, с типом 'tex': {tex_count}")
-        
-        # Ждем до следующей проверки, но синхронизируемся с началом секунды
-        await asyncio.sleep(1)
+        now_ts  = time.time()
+        sleep_s = 15.0 - (now_ts % 15.0)
+        await asyncio.sleep(sleep_s)
 
+        now = datetime.datetime.now(TZ_MSK)
+        chats_snapshot = list(DATABASE.get("chats", {}).items())
+        for pid, chat in chats_snapshot:
+            if chat.get("type") == "tex":
+                delay    = round(random.uniform(0, 1), 2)
+                time_str = now.strftime("%H:%M:%S")
+                date_str = now.strftime("%d/%m/%Y")
+                msg = (
+                    f"…::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::…\n\n"
+                    f"| ==> Бот успешно работает.\n"
+                    f"| Задержка Бота: {delay}\n"
+                    f"| Точное время: {time_str}\n"
+                    f"| Дата: {date_str}"
+                )
+                try:
+                    await bot.api.messages.send(
+                        peer_id=int(pid),
+                        message=msg,
+                        random_id=random.randint(0, 2**31)
+                    )
+                except Exception as e:
+                    print(f"[send_reports] error pid={pid}: {e}")
 # ────────────────────────────────────────────────
 # Keep-Alive
 # ────────────────────────────────────────────────
 async def keep_alive():
+    """
+    Пинг каждые 4 минуты — не даёт Render засыпать (Free tier засыпает через 15 мин).
+    Использует aiohttp (async) — не блокирует event loop.
+    """
     while True:
+        await asyncio.sleep(240)  # 4 минуты — надёжно в рамках 15-минутного лимита
         try:
-            url = os.environ.get("RENDER_EXTERNAL_URL")
+            url = os.environ.get("RENDER_EXTERNAL_URL", "")
             if url:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
-                        url + "?keepalive=1",
+                        url + "?ping=1",
                         timeout=aiohttp.ClientTimeout(total=10)
-                    ):
-                        print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive отправлен")
+                    ) as resp:
+                        print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive → {resp.status}")
         except Exception as e:
-            print("Keep-alive error:", e)
-        await asyncio.sleep(600)
-
-# ────────────────────────────────────────────────
-# Запуск
-# ────────────────────────────────────────────────
+            print(f"[keep_alive] error: {e}")
 async def _startup():
-    """Инициализация: создаём пул MySQL и запускаем фоновые задачи."""
-    print("[DEBUG] Начинаем инициализацию...")
+    """
+    Инициализация БД + фоновые задачи.
+    asyncio.run() гарантирует что loop активен при create_task.
+    """
     await _init_db_pool()
-    print("[DEBUG] База данных инициализирована")
-    loop = asyncio.get_event_loop()
-    print("[DEBUG] Создаем задачу send_reports...")
-    loop.create_task(send_reports())
-    print("[DEBUG] Создаем задачу keep_alive...")
-    loop.create_task(keep_alive())
-    print("Бот запущен. Keep-alive и тех.отчёты активны.")
+    # Задачи создаются при активном loop — работают гарантированно
+    asyncio.create_task(send_reports())
+    asyncio.create_task(keep_alive())
+    print("Бот запущен. send_reports и keep_alive активны.")
+    await bot.run_polling()
+
 
 if __name__ == "__main__":
     threading.Thread(
         target=HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), H).serve_forever,
         daemon=True
     ).start()
-    # Создаём единый event loop, инициализируем БД, затем запускаем бота
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(_startup())
-    bot.run_forever()
+    asyncio.run(_startup())
