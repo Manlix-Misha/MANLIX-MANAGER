@@ -2149,6 +2149,8 @@ async def typetex_cmd(m: Message, args=None):
             else:
                 DATABASE["chats"][pid]["type"] = new_type
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+                print(f"[DEBUG] Тип беседы {pid} изменен на {new_type}")
+                print(f"[DEBUG] Текущий тип в DATABASE: {DATABASE['chats'][pid].get('type')}")
                 await m.answer(f"Технический тип Беседы изменён на: {new_type}")
             return
         else:
@@ -3793,8 +3795,13 @@ async def send_reports():
             chats_count = 0
             tex_count = 0
             
+            # Проверяем загружены ли данные
+            print(f"[DEBUG] DATABASE загружен: {bool(DATABASE)}")
+            print(f"[DEBUG] DATABASE ключи: {list(DATABASE.keys()) if DATABASE else 'None'}")
+            
             # Создаем копию данных чтобы избежать изменений во время итерации
             chats_data = DATABASE.get("chats", {}).copy()
+            print(f"[DEBUG] Найдено бесед: {len(chats_data)}")
             
             for pid, chat in chats_data.items():
                 chats_count += 1
