@@ -2147,26 +2147,16 @@ async def typetex_cmd(m: Message, args=None):
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
                 await m.answer(f"Технический тип Беседы изменён на: clogs (источник: {source_id})")
             else:
-                old_type = DATABASE["chats"][pid].get("type", "def")
                 DATABASE["chats"][pid]["type"] = new_type
                 await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-                
-                if new_type == "tex":
-                    await m.answer(
-                        f"Технический тип Беседы изменён на: {new_type}\n"
-                        f"Предыдущий тип: {old_type}\n\n"
-                        f"Технические отчеты будут приходить каждые 15 секунд\n"
-                        f"Время отправки: 00, 15, 30, 45 секунд каждой минуты"
-                    )
-                else:
-                    await m.answer(f"Технический тип Беседы изменён на: {new_type}")
+                await m.answer(f"Технический тип Беседы изменён на: {new_type}")
             return
         else:
             await m.answer("Неверный тип. Доступные технические типы смотри ниже.")
     current = DATABASE["chats"][pid].get("type", "def")
     await m.answer(
         f"Беседа имеет тип: {current}\n\n"
-        "tex - Тех. Раздел (технические отчеты)\n"
+        "tex - Тех. Раздел\n"
         "bug - Баг-трекер\n"
         "add - Беседа предложений\n"
         "logs - Беседа логов\n"
@@ -3794,59 +3784,49 @@ async def actions(m: Message):
 async def send_reports():
     print("[DEBUG] Функция send_reports запущена")
     while True:
-        try:
-            now = datetime.datetime.now(TZ_MSK)
-            current_second = now.second
+        now = datetime.datetime.now(TZ_MSK)
+        current_second = now.second
+        
+        # Проверяем каждые 15 секунд (0, 15, 30, 45)
+        if current_second % 15 == 0:
+            print(f"[DEBUG] Проверяем тех.отчеты в {now.strftime('%H:%M:%S')}")
+            chats_count = 0
+            tex_count = 0
             
-            # Проверяем каждые 15 секунд (0, 15, 30, 45)
-            if current_second % 15 == 0:
-                print(f"[DEBUG] Проверяем тех.отчеты в {now.strftime('%H:%M:%S')}")
-                chats_count = 0
-                tex_count = 0
+            # Создаем копию данных чтобы избежать изменений во время итерации
+            chats_data = DATABASE.get("chats", {}).copy()
+            
+            for pid, chat in chats_data.items():
+                chats_count += 1
+                chat_type = chat.get("type")
+                print(f"[DEBUG] Беседа {pid} имеет тип: {chat_type}")
                 
-                # Убеждаемся что данные загружены
-                if not DATABASE:
-                    print("[DEBUG] DATABASE пуст, пропускаем проверку")
-                    await asyncio.sleep(1)
-                    continue
-                
-                # Создаем копию данных чтобы избежать изменений во время итерации
-                chats_data = DATABASE.get("chats", {}).copy()
-                
-                for pid, chat in chats_data.items():
-                    chats_count += 1
-                    chat_type = chat.get("type")
-                    print(f"[DEBUG] Беседа {pid} имеет тип: {chat_type}")
-                    
-                    if chat_type == "tex":
-                        tex_count += 1
-                        delay    = round(random.uniform(0, 1), 2)
-                        time_str = now.strftime("%H:%M:%S")
-                        date_str = now.strftime("%d/%m/%Y")
-                        msg = (
-                            f"…::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::…\n\n"
-                            f"| ==> Бот успешно работает.\n"
-                            f"| Задержка Бота: {delay}\n"
-                            f"| Точное время: {time_str}\n"
-                            f"| Дата: {date_str}"
+                if chat_type == "tex":
+                    tex_count += 1
+                    delay    = round(random.uniform(0, 1), 2)
+                    time_str = now.strftime("%H:%M:%S")
+                    date_str = now.strftime("%d/%m/%Y")
+                    msg = (
+                        f"…::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::…\n\n"
+                        f"| ==> Бот успешно работает.\n"
+                        f"| Задержка Бота: {delay}\n"
+                        f"| Точное время: {time_str}\n"
+                        f"| Дата: {date_str}"
+                    )
+                    try:
+                        await bot.api.messages.send(
+                            peer_id=int(pid),
+                            message=msg,
+                            random_id=random.randint(0, 2**32 - 1)
                         )
-                        try:
-                            await bot.api.messages.send(
-                                peer_id=int(pid),
-                                message=msg,
-                                random_id=random.randint(0, 2**32 - 1)
-                            )
-                            print(f"[DEBUG] Отчет отправлен в беседу {pid}")
-                        except Exception as e:
-                            print(f"[DEBUG] Ошибка отправки в беседу {pid}: {e}")
-                
-                print(f"[DEBUG] Всего бесед: {chats_count}, с типом 'tex': {tex_count}")
+                        print(f"[DEBUG] Отчет отправлен в беседу {pid}")
+                    except Exception as e:
+                        print(f"[DEBUG] Ошибка отправки в беседу {pid}: {e}")
             
-            # Ждем до следующей проверки, но синхронизируемся с началом секунды
-            await asyncio.sleep(1)
-        except Exception as e:
-            print(f"[DEBUG] Ошибка в send_reports: {e}")
-            await asyncio.sleep(5)  # Пауза при ошибке
+            print(f"[DEBUG] Всего бесед: {chats_count}, с типом 'tex': {tex_count}")
+        
+        # Ждем до следующей проверки, но синхронизируемся с началом секунды
+        await asyncio.sleep(1)
 
 # ────────────────────────────────────────────────
 # Keep-Alive
