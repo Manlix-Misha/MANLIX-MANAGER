@@ -2879,8 +2879,8 @@ async def reset_money_cmd(m: Message, args=None):
     ECONOMY[uid]["cash"] = 0
     ECONOMY[uid]["bank"] = 0
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    t_display    = await get_display_name(t, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    t_display = await get_display_name(t, peer_id=m.peer_id)
     await m.answer(
         f"[id{m.from_id}|{a_display}] обнулил Баланс [id{t}|{t_display}]"
     )
@@ -2915,7 +2915,7 @@ async def reset_chat_cmd(m: Message, args=None):
         target_pid = str(m.reply_message.peer_id)
     if not target_pid:
         return await m.answer("Укажите ID беседы. Пример: /reset_chat 2000000001")
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     if target_pid in DATABASE.get("chats", {}):
         del DATABASE["chats"][target_pid]
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
@@ -2933,7 +2933,7 @@ async def reset_chat_all_cmd(m: Message):
     if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
         return await m.answer("Недостаточно прав!")
     # Получаем имя ДО очистки — после DATABASE["chats"] будет пуст
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     DATABASE["chats"] = {}
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await m.answer(f"[id{m.from_id}|{a_display}] обнулил(-а) все чаты из Базы данных.")
@@ -2950,7 +2950,7 @@ async def reset_economy_cmd(m: Message):
     if not can_tex(m.from_id, m.peer_id, "Главный ТС"):
         return await m.answer("Недостаточно прав!")
     global ECONOMY
-    spec_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
     ECONOMY = {}
     await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
     await m.answer(f"[id{m.from_id}|{a_display}] обнулил(-а) экономику Бота.")
@@ -3749,32 +3749,49 @@ async def send_reports():
 # Keep-Alive
 # ────────────────────────────────────────────────
 async def keep_alive():
-    """Keep-alive пинг каждые 10 минут — через urllib, без aiohttp."""
-    import urllib.request as _urllib_req
+    """Keep-alive пинг каждые 10 минут — полностью async, не блокирует loop."""
     while True:
         await asyncio.sleep(600)
         try:
             url = os.environ.get("RENDER_EXTERNAL_URL", "")
             if url:
-                _urllib_req.urlopen(url + "?keepalive=1", timeout=10)
+                # asyncio.open_connection — не блокирует event loop
+                import urllib.parse as _urlparse
+                parsed = _urlparse.urlparse(url)
+                host = parsed.hostname
+                port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                path = (parsed.path or "/") + "?keepalive=1"
+                try:
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection(host, 80),
+                        timeout=5
+                    )
+                    writer.write(("GET " + path + " HTTP/1.0\r\nHost: " + host + "\r\n\r\n").encode())
+
+                    await writer.drain()
+                    await asyncio.wait_for(reader.read(128), timeout=5)
+                    writer.close()
+                except Exception:
+                    pass
                 print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive OK")
         except Exception as e:
             print(f"[keep_alive] error: {e}")
 async def _startup():
-    """Инициализация: создаём пул MySQL и запускаем фоновые задачи."""
+    """
+    Инициализация MySQL + фоновые задачи.
+    Вызывается через asyncio.run() — loop активен всё время работы.
+    """
     await _init_db_pool()
-    loop = asyncio.get_event_loop()
-    loop.create_task(send_reports())
-    loop.create_task(keep_alive())
     print("Бот запущен. Keep-alive и тех.отчёты активны.")
+    # Запускаем фоновые задачи — loop активен, create_task работает корректно
+    asyncio.create_task(send_reports())
+    asyncio.create_task(keep_alive())
+    # Запускаем бота — он работает до остановки
+    await bot.run_polling()
 
 if __name__ == "__main__":
     threading.Thread(
         target=HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), H).serve_forever,
         daemon=True
     ).start()
-    # Создаём единый event loop, инициализируем БД, затем запускаем бота
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(_startup())
-    bot.run_forever()
+    asyncio.run(_startup())
