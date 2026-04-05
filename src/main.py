@@ -3803,39 +3803,35 @@ async def keep_alive():
         except Exception as e:
             print(f"[keep_alive] error: {e}")
 async def _init_bot():
-    """Инициализация БД. Вызывается через loop.run_until_complete()."""
+    """
+    Инициализация БД.
+    Вызывается через bot.loop_wrapper.on_startup — внутри loop vkbottle.
+    Это гарантирует что aiomysql пул создан в правильном loop.
+    """
     await _init_db_pool()
     print("Инициализация завершена. Запуск бота...")
 
 if __name__ == "__main__":
-    # HTTP keep-alive сервер в отдельном потоке
+    # HTTP сервер для Render (определяет порт как "открытый")
     threading.Thread(
         target=HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), H).serve_forever,
         daemon=True
     ).start()
 
-    # Единый event loop на всё время работы бота
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # ── ПРАВИЛЬНЫЙ СПОСОБ добавления фоновых задач в vkbottle ──
+    # bot.loop_wrapper — встроенный в vkbottle менеджер event loop.
+    # on_startup: корутины запустятся ПЕРЕД запуском бота (init DB).
+    # add_task:   корутины запустятся ВМЕСТЕ с ботом (фоновые задачи).
+    # bot.run_forever() запускает всё это через свой loop_wrapper.
+    # loop.create_task() НЕ работает — vkbottle управляет loop самостоятельно.
 
-    # 1. Инициализируем БД в этом loop (aiomysql пул привязан к нему)
-    loop.run_until_complete(_init_bot())
+    # 1. Инициализация БД перед стартом
+    bot.loop_wrapper.on_startup.append(_init_bot())
 
-    # 2. Создаём фоновые задачи (pending до запуска loop.run_forever)
-    task_reports = loop.create_task(send_reports())
-    task_keepalive = loop.create_task(keep_alive())
+    # 2. Фоновые задачи — запустятся вместе с ботом в том же loop
+    bot.loop_wrapper.add_task(send_reports())
+    bot.loop_wrapper.add_task(keep_alive())
 
-    # Callback для отлова тихих смертей задач
-    def _task_done_callback(task):
-        if task.cancelled():
-            print(f"[task] {task.get_name()} отменена")
-        elif task.exception():
-            print(f"[task] {task.get_name()} упала: {task.exception()}")
-
-    task_reports.add_done_callback(_task_done_callback)
-    task_keepalive.add_done_callback(_task_done_callback)
-
-    # 3. Запускаем бота — bot.run_forever() вызывает loop.run_forever()
-    #    Тот же loop → aiomysql пул работает, задачи выполняются
-    print("Бот запущен. send_reports и keep_alive активны.")
+    # 3. Запуск — bot.run_forever() запускает loop_wrapper со всеми задачами
+    print("Запуск бота через bot.loop_wrapper...")
     bot.run_forever()
