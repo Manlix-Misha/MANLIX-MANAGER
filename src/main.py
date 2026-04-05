@@ -167,10 +167,17 @@ def normalize_command(text: str) -> str:
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", "2")
         self.end_headers()
         self.wfile.write(b"OK")
+    def do_HEAD(self):
+        # UptimeRobot иногда использует HEAD вместо GET
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
     def log_message(self, format, *args):
-        pass
+        pass  # Подавляем логи HTTP чтобы не спамить
 
 # ────────────────────────────────────────────────
 # MySQL (Aiven) — хранилище данных (aiomysql, async)
@@ -356,10 +363,17 @@ async def push_to_github(data: dict, gh_path: str, local_path: str):
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", "2")
         self.end_headers()
         self.wfile.write(b"OK")
+    def do_HEAD(self):
+        # UptimeRobot иногда использует HEAD вместо GET
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
     def log_message(self, format, *args):
-        pass
+        pass  # Подавляем логи HTTP чтобы не спамить
 
 # ────────────────────────────────────────────────
 # Инициализация данных (синхронная загрузка при старте)
@@ -3786,22 +3800,31 @@ async def send_reports():
 # ────────────────────────────────────────────────
 async def keep_alive():
     """
-    Пинг каждые 4 минуты — не даёт Render засыпать (Free tier засыпает через 15 мин).
-    Использует aiohttp (async) — не блокирует event loop.
+    Резервный самопинг каждые 3 минуты.
+    ВАЖНО: Render Free засыпает от ВНЕШНЕЙ неактивности.
+    Самопинг — это резерв. Основная защита — внешний UptimeRobot.
+    Инструкция: https://uptimerobot.com → New Monitor → HTTP(S) → URL сервиса Render.
     """
+    # Первый пинг через 30 секунд после старта
+    await asyncio.sleep(30)
     while True:
-        await asyncio.sleep(240)  # 4 минуты — надёжно в рамках 15-минутного лимита
         try:
             url = os.environ.get("RENDER_EXTERNAL_URL", "")
             if url:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        url + "?ping=1",
-                        timeout=aiohttp.ClientTimeout(total=10)
-                    ) as resp:
-                        print(f"[{datetime.datetime.now(TZ_MSK).strftime('%H:%M:%S')}] Keep-alive → {resp.status}")
+                if aiohttp:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            url,
+                            timeout=aiohttp.ClientTimeout(total=8)
+                        ) as resp:
+                            ts = datetime.datetime.now(TZ_MSK).strftime("%H:%M:%S")
+                            print(f"[{ts}] keep-alive → HTTP {resp.status}")
+                else:
+                    print("[keep_alive] aiohttp недоступен, пропуск")
         except Exception as e:
             print(f"[keep_alive] error: {e}")
+        # Каждые 3 минуты — гарантированно в рамках 15-минутного лимита Render
+        await asyncio.sleep(180)
 async def _init_bot():
     """
     Инициализация БД.
