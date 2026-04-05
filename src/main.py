@@ -299,6 +299,16 @@ async def _init_db_pool():
     if "texstaff" not in STAFF:
         STAFF["texstaff"] = {}
 
+    # Сохраняем инициализированные данные обратно в MySQL
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+    await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
+    print("[MySQL] Инициализированные данные сохранены в БД")
+
+    # Диагностика: покажем беседы с типом tex
+    tex_count = sum(1 for c in DATABASE.get("chats", {}).values() if c.get("type") == "tex")
+    print(f"[MySQL] Загружено бесед: {len(DATABASE.get('chats', {}))} | С типом tex: {tex_count}")
+
 async def load_from_github(gh_path: str, local_path: str) -> dict:
     """Загружает данные из MySQL. Фоллбек — локальный файл."""
     table = _TABLE_MAP.get(gh_path)
@@ -3714,37 +3724,63 @@ async def actions(m: Message):
 # ────────────────────────────────────────────────
 async def send_reports():
     """
-    Технические отчёты ровно в :00, :15, :30, :45 каждой минуты.
-    Алгоритм: вычисляем точное время до следующего кратного 15 — нет дрейфа.
+    Технические отчёты ровно в :00, :15, :30, :45.
+    Точный таймер — без дрейфа. Вся функция защищена от краша.
     """
-    print("[send_reports] Запущен")
-    while True:
-        now_ts  = time.time()
-        sleep_s = 15.0 - (now_ts % 15.0)
-        await asyncio.sleep(sleep_s)
+    print("[send_reports] Задача запущена")
+    # Ждём полной инициализации (на случай если задача стартовала раньше)
+    await asyncio.sleep(2)
+    print(f"[send_reports] Беседы в DATABASE: {len(DATABASE.get('chats', {}))}")
+    tex_chats = [pid for pid, c in DATABASE.get('chats', {}).items() if c.get('type') == 'tex']
+    print(f"[send_reports] Беседы с типом tex: {tex_chats}")
 
-        now = datetime.datetime.now(TZ_MSK)
-        chats_snapshot = list(DATABASE.get("chats", {}).items())
-        for pid, chat in chats_snapshot:
-            if chat.get("type") == "tex":
-                delay    = round(random.uniform(0, 1), 2)
-                time_str = now.strftime("%H:%M:%S")
-                date_str = now.strftime("%d/%m/%Y")
-                msg = (
-                    f"…::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::…\n\n"
-                    f"| ==> Бот успешно работает.\n"
-                    f"| Задержка Бота: {delay}\n"
-                    f"| Точное время: {time_str}\n"
-                    f"| Дата: {date_str}"
-                )
+    while True:
+        try:
+            # Точное время до следующего кратного 15 секунд
+            now_ts  = time.time()
+            sleep_s = 15.0 - (now_ts % 15.0)
+            # Минимум 0.1с чтобы не отправлять дважды за одну секунду
+            if sleep_s < 0.1:
+                sleep_s += 15.0
+            await asyncio.sleep(sleep_s)
+
+            now = datetime.datetime.now(TZ_MSK)
+            chats_snapshot = list(DATABASE.get("chats", {}).items())
+
+            for pid, chat in chats_snapshot:
                 try:
+                    if not isinstance(chat, dict):
+                        continue
+                    if chat.get("type") != "tex":
+                        continue
+                    delay    = round(random.uniform(0, 1), 2)
+                    time_str = now.strftime("%H:%M:%S")
+                    date_str = now.strftime("%d/%m/%Y")
+                    msg = (
+                        f"…::: ТЕХНИЧЕСКИЙ ОТЧЕТ :::…\n\n"
+                        f"| ==> Бот успешно работает.\n"
+                        f"| Задержка Бота: {delay}\n"
+                        f"| Точное время: {time_str}\n"
+                        f"| Дата: {date_str}"
+                    )
                     await bot.api.messages.send(
                         peer_id=int(pid),
                         message=msg,
                         random_id=random.randint(0, 2**31)
                     )
+                    print(f"[send_reports] ✅ Отчёт → беседа {pid} в {time_str}")
                 except Exception as e:
-                    print(f"[send_reports] error pid={pid}: {e}")
+                    print(f"[send_reports] ❌ Ошибка в беседе {pid}: {e}")
+
+        except asyncio.CancelledError:
+            print("[send_reports] Задача отменена")
+            return
+        except Exception as e:
+            # Задача НЕ умирает — перезапускаемся через 5 секунд
+            print(f"[send_reports] ❌ Критическая ошибка: {e}. Перезапуск через 5с...")
+            await asyncio.sleep(5)
+
+
 # ────────────────────────────────────────────────
 # Keep-Alive
 # ────────────────────────────────────────────────
@@ -3786,8 +3822,18 @@ if __name__ == "__main__":
     loop.run_until_complete(_init_bot())
 
     # 2. Создаём фоновые задачи (pending до запуска loop.run_forever)
-    loop.create_task(send_reports())
-    loop.create_task(keep_alive())
+    task_reports = loop.create_task(send_reports())
+    task_keepalive = loop.create_task(keep_alive())
+
+    # Callback для отлова тихих смертей задач
+    def _task_done_callback(task):
+        if task.cancelled():
+            print(f"[task] {task.get_name()} отменена")
+        elif task.exception():
+            print(f"[task] {task.get_name()} упала: {task.exception()}")
+
+    task_reports.add_done_callback(_task_done_callback)
+    task_keepalive.add_done_callback(_task_done_callback)
 
     # 3. Запускаем бота — bot.run_forever() вызывает loop.run_forever()
     #    Тот же loop → aiomysql пул работает, задачи выполняются
