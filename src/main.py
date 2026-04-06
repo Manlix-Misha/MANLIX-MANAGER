@@ -1806,7 +1806,14 @@ async def gstaff_view(m: Message):
 
 @bot.on.message(text="/start")
 async def start(m: Message):
-    if not await check_access(m, "Специальный Руководитель"): return
+    rank, _ = get_user_info(m.peer_id, m.from_id)
+    if RANK_WEIGHT.get(rank, 0) < RANK_WEIGHT.get("Специальный Руководитель", 10):
+        await m.answer(
+            "Владелец беседы — не член команды бота, я не буду здесь работать!\n\n"
+            "Чтобы я начал работу в данном чате тебе нужно обратиться к моему специальному руководителю написать ему в личные сообщения! Вк его. [id870757778|Специальный руководитель]"
+        )
+        return
+    
     global GROUP_ID
     pid = str(m.peer_id)
     ensure_chat(pid)
@@ -3348,10 +3355,8 @@ async def actions(m: Message):
             await bot.api.messages.send(
                 peer_id=m.peer_id,
                 message=(
-                    "Привет! Я MANLIX MANAGER.\n\n"
-                    "Выдайте мне права администратора, затем введите:\n"
-                    "/start — активировать беседу\n"
-                    "/type — выбрать тип беседы"
+                    "Бот добавлен в беседу, выдайте мне администратора, а затем введите /sync для синхронизации c базой данных!\n\n"
+                    "Также с помощью /type Вы можете выбрать тип беседы!"
                 ),
                 random_id=int(time.time() * 1000) % (2**31)
             )
