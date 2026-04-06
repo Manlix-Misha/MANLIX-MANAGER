@@ -166,6 +166,20 @@ def normalize_command(text: str) -> str:
 # ────────────────────────────────────────────────
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
+        # Health-check с проверкой БД
+        if self.path == "/health":
+            db_ok = _DB_POOL is not None
+            status = "OK" if db_ok else "DB_ERROR"
+            code = 200 if db_ok else 503
+            body = f"{status}\n".encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+            
+        # Обычный ответ для UptimeRobot
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", "2")
@@ -2801,7 +2815,7 @@ async def get_info_cmd(m: Message, args=None):
     owner_count = sum(
         1 for chat in DATABASE.get("chats", {}).values()
         if uid in chat.get("staff", {}) and "Владелец" in get_all_local_roles(
-            str(list(DATABASE["chats"].keys())[list(DATABASE["chats"].values()).index(chat)]), uid
+            str(list(DATABASE["chats"].keys())[list(DATABASE["chаты"].values()).index(chat)]), uid
         )
     )
     # Кол-во всех локальных банов
@@ -3736,11 +3750,20 @@ async def actions(m: Message):
 # ────────────────────────────────────────────────
 # Технические отчёты
 # ────────────────────────────────────────────────
+# Глобальный флаг для защиты от дублей
+_REPORTS_RUNNING = False
+
 async def send_reports():
     """
     Технические отчёты ровно в :00, :15, :30, :45.
     Точный таймер — без дрейфа. Вся функция защищена от краша.
     """
+    global _REPORTS_RUNNING
+    if _REPORTS_RUNNING:
+        print("[send_reports] Уже запущено, пропускаем дубль")
+        return
+    _REPORTS_RUNNING = True
+    
     print("[send_reports] Задача запущена")
     # Ждём полной инициализации (на случай если задача стартовала раньше)
     await asyncio.sleep(2)
@@ -3796,35 +3819,16 @@ async def send_reports():
 
 
 # ────────────────────────────────────────────────
-# Keep-Alive
+# Keep-Alive (заглушка)
+# ────────────────────────────────────────────────
+# ВАЖНО: Render Free засыпает через 15 мин без ВНЕШНИХ запросов.
+# Внутренний пинг НЕ работает. Используй UptimeRobot/Pingdom:
+# https://uptimerobot.com → New Monitor → HTTP(S) → URL Render
 # ────────────────────────────────────────────────
 async def keep_alive():
-    """
-    Резервный самопинг каждые 3 минуты.
-    ВАЖНО: Render Free засыпает от ВНЕШНЕЙ неактивности.
-    Самопинг — это резерв. Основная защита — внешний UptimeRobot.
-    Инструкция: https://uptimerobot.com → New Monitor → HTTP(S) → URL сервиса Render.
-    """
-    # Первый пинг через 30 секунд после старта
-    await asyncio.sleep(30)
-    while True:
-        try:
-            url = os.environ.get("RENDER_EXTERNAL_URL", "")
-            if url:
-                if aiohttp:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(
-                            url,
-                            timeout=aiohttp.ClientTimeout(total=8)
-                        ) as resp:
-                            ts = datetime.datetime.now(TZ_MSK).strftime("%H:%M:%S")
-                            print(f"[{ts}] keep-alive → HTTP {resp.status}")
-                else:
-                    print("[keep_alive] aiohttp недоступен, пропуск")
-        except Exception as e:
-            print(f"[keep_alive] error: {e}")
-        # Каждые 3 минуты — гарантированно в рамках 15-минутного лимита Render
-        await asyncio.sleep(180)
+    """Пустая заглушка — внешний мониторинг через UptimeRobot."""
+    await asyncio.sleep(0)  # Ничего не делает
+
 async def _init_bot():
     """
     Инициализация БД.
@@ -3853,7 +3857,7 @@ if __name__ == "__main__":
 
     # 2. Фоновые задачи — запустятся вместе с ботом в том же loop
     bot.loop_wrapper.add_task(send_reports())
-    bot.loop_wrapper.add_task(keep_alive())
+    # keep_alive убран — используйте UptimeRobot для пинга /health
 
     # 3. Запуск — bot.run_forever() запускает loop_wrapper со всеми задачами
     print("Запуск бота через bot.loop_wrapper...")
