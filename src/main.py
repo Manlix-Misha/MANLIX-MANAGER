@@ -105,6 +105,13 @@ ALT_ALIASES: dict = {
     "filter":        ["фильтр"],
     "server":        ["сервер"],
     "serverinfo":    ["серверинфо"],
+    "galt":          [],
+    "gamehelp":      ["ghelp", "гхелп"],
+    "prise":         ["bonus", "приз", "бонус"],
+    "balance":       ["баланс"],
+    "bank":          ["банк"],
+    "roulette":      ["рулетка", "казино"],
+    "duel":          ["дуэль", "сражение"],
 }
 
 _ALT_REVERSE: dict = {}
@@ -784,6 +791,26 @@ async def alt_cmd(m: Message, args=None):
             "/serverinfo -- серверинфо"
         )
     await m.answer(msg)
+
+@bot.on.message(text="/galt")
+async def galt_cmd(m: Message):
+    await m.answer(
+        "Альтернативные команды\n\n"
+        "| Префиксы для команд:\n"
+        "- « / »\n"
+        "- « + »\n"
+        "- « . »\n"
+        "- « - »\n\n"
+        "/gamehelp -- ghelp, гхелп\n"
+        "/prise -- bonus, приз, бонус\n"
+        "/balance -- баланс\n"
+        "/bank -- банк\n"
+        "/положить -- none\n"
+        "/взять -- none\n"
+        "/перевести -- передать\n"
+        "/roulette -- рулетка, казино\n"
+        "/duel -- дуэль, сражение"
+    )
 
 @bot.on.message(text="/help")
 async def help_cmd(m: Message):
@@ -3466,6 +3493,63 @@ async def send_reports():
             print(f"[send_reports] ❌ Критическая ошибка: {e}. Перезапуск через 5с...")
             await asyncio.sleep(5)
 
+_BAN_CLEANER_RUNNING = False
+
+async def ban_cleaner():
+    global _BAN_CLEANER_RUNNING
+    if _BAN_CLEANER_RUNNING:
+        print("[ban_cleaner] Уже запущено, пропускаем дубль")
+        return
+    _BAN_CLEANER_RUNNING = True
+    
+    print("[ban_cleaner] Задача запущена")
+    BAN_DURATION = 90 * 24 * 60 * 60  # 90 дней в секундах
+    
+    while True:
+        try:
+            now = datetime.datetime.now(TZ_MSK)
+            # Ждем до 00:00:05 МСК
+            target = now.replace(hour=0, minute=0, second=5, microsecond=0)
+            if now >= target:
+                target += datetime.timedelta(days=1)
+            sleep_seconds = (target - now).total_seconds()
+            print(f"[ban_cleaner] Следующая проверка в {target}, спим {sleep_seconds:.0f} сек")
+            await asyncio.sleep(sleep_seconds)
+            
+            # Проверяем и чистим баны
+            current_time = time.time()
+            cleaned_count = 0
+            
+            bans_copy = dict(PUNISHMENTS.get("bans", {}))
+            for pid, users in bans_copy.items():
+                users_to_remove = []
+                for uid, ban_data in users.items():
+                    ban_date = ban_data.get("date", 0)
+                    if current_time - ban_date > BAN_DURATION:
+                        users_to_remove.append(uid)
+                
+                for uid in users_to_remove:
+                    del PUNISHMENTS["bans"][pid][uid]
+                    cleaned_count += 1
+                    print(f"[ban_cleaner] Удалён бан: пользователь {uid} из беседы {pid}")
+                
+                # Удаляем пустые беседы из bans
+                if not PUNISHMENTS["bans"][pid]:
+                    del PUNISHMENTS["bans"][pid]
+            
+            if cleaned_count > 0:
+                await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
+                print(f"[ban_cleaner] Очищено {cleaned_count} устаревших банов")
+            else:
+                print("[ban_cleaner] Устаревших банов не найдено")
+                
+        except asyncio.CancelledError:
+            print("[ban_cleaner] Задача отменена")
+            return
+        except Exception as e:
+            print(f"[ban_cleaner] Ошибка: {e}. Перезапуск через 60 сек...")
+            await asyncio.sleep(60)
+
 async def keep_alive():
     await asyncio.sleep(0)
 
@@ -3481,6 +3565,7 @@ if __name__ == "__main__":
 
     bot.loop_wrapper.on_startup.append(_init_bot())
     bot.loop_wrapper.add_task(send_reports())
+    bot.loop_wrapper.add_task(ban_cleaner())
 
     print("Запуск бота через bot.loop_wrapper...")
     bot.run_forever()
