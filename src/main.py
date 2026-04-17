@@ -7,6 +7,12 @@ try:
     import aiomysql
 except ImportError:
     aiomysql = None
+try:
+    import discord
+    from discord import app_commands
+except ImportError:
+    discord = None
+    app_commands = None
 import random
 import asyncio
 import time
@@ -26,11 +32,13 @@ GH_PATH_DB    = "database.json"
 GH_PATH_ECO   = "economy.json"
 GH_PATH_PUN   = "punishments.json"
 GH_PATH_STAFF = "staff.json"
+GH_PATH_DISCORD = "discord.json"
 
 EXTERNAL_DB    = "database.json"
 EXTERNAL_ECO   = "economy.json"
 EXTERNAL_PUN   = "punishments.json"
 EXTERNAL_STAFF = "staff.json"
+EXTERNAL_DISCORD = "discord.json"
 
 TZ_MSK = datetime.timezone(datetime.timedelta(hours=3))
 
@@ -168,6 +176,7 @@ _TABLE_MAP = {
     "economy.json":     "economy",
     "punishments.json": "punishments",
     "staff.json":       "staff",
+    "discord.json":     "discord",
 }
 
 def load_local_data(path: str) -> dict:
@@ -215,7 +224,7 @@ async def _get_db_pool():
 _DB_POOL = None
 
 async def _init_db_pool():
-    global _DB_POOL, DATABASE, ECONOMY, PUNISHMENTS, STAFF
+    global _DB_POOL, DATABASE, ECONOMY, PUNISHMENTS, STAFF, DISCORD_DATA
     _DB_POOL = await _get_db_pool()
     if _DB_POOL is None:
         print("[MySQL] Пул не создан — работаем без MySQL")
@@ -235,13 +244,14 @@ async def _init_db_pool():
         "economy":     "Экономика — деньги, банк, пиво, мини-игры",
         "punishments": "Наказания — глобальные блокировки, локальные баны, муты, варны",
         "staff":       "Руководство — гстаф, тестировщики, тех.специалисты, будущие роли",
+        "discord":     "Discord каналы для логов",
     }
     try:
         async with _DB_POOL.acquire() as conn:
             async with conn.cursor() as cur:
                 for table, comment in table_comments.items():
                     await cur.execute(create_sql.format(table=table, comment=comment))
-        print("[MySQL] Таблицы готовы: chats, economy, punishments, staff")
+        print("[MySQL] Таблицы готовы: chats, economy, punishments, staff, discord")
     except Exception as e:
         print(f"[MySQL] create tables error: {e}")
 
@@ -249,10 +259,12 @@ async def _init_db_pool():
     eco = await load_from_github(GH_PATH_ECO,   EXTERNAL_ECO)
     pun = await load_from_github(GH_PATH_PUN,   EXTERNAL_PUN)
     stf = await load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF)
+    disc = await load_from_github(GH_PATH_DISCORD, EXTERNAL_DISCORD)
     if isinstance(db,  dict): DATABASE    = db
     if isinstance(eco, dict): ECONOMY     = eco
     if isinstance(pun, dict): PUNISHMENTS = pun
     if isinstance(stf, dict): STAFF       = stf
+    if isinstance(disc, dict): DISCORD_DATA = disc
     print("[MySQL] Данные загружены из БД")
 
     for key in ("gbans_status", "gbans_pl", "bans", "warns"):
@@ -270,10 +282,13 @@ async def _init_db_pool():
         STAFF["testers"] = {}
     if "texstaff" not in STAFF:
         STAFF["texstaff"] = {}
+    if "log_channels" not in DISCORD_DATA:
+        DISCORD_DATA["log_channels"] = {}
 
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
+    await push_to_github(DISCORD_DATA, GH_PATH_DISCORD, EXTERNAL_DISCORD)
     print("[MySQL] Инициализированные данные сохранены в БД")
 
     tex_count = sum(1 for c in DATABASE.get("chats", {}).values() if c.get("type") == "tex")
@@ -316,8 +331,10 @@ DATABASE    = {}
 ECONOMY     = {}
 PUNISHMENTS = {}
 STAFF       = {}
+DISCORD_DATA = {}
 
 GROUP_ID = None
+discord_bot = None
 
 bot = Bot(token=os.environ.get("TOKEN"))
 
@@ -444,7 +461,7 @@ def get_user_info(peer_id, user_id):
         all_local = [entry[0]]
         if len(entry) > 2 and isinstance(entry[2], list):
             all_local += entry[2]
-        local_role = max(all_local, key=lambda r: RANK_WEIGHT.get(r, 0))
+        local_role = max(all_u_roles, key=lambda r: RANK_WEIGHT.get(r, 0))
         nick       = entry[1]
     else:
         local_role = "Пользователь"
@@ -1938,11 +1955,12 @@ async def delchat(m: Message):
 @bot.on.message(text="/sync")
 async def sync(m: Message):
     if not await check_access(m, "Специальный Руководитель"): return
-    global DATABASE, ECONOMY, PUNISHMENTS, STAFF
+    global DATABASE, ECONOMY, PUNISHMENTS, STAFF, DISCORD_DATA
     DATABASE    = await load_from_github(GH_PATH_DB,    EXTERNAL_DB)
     ECONOMY     = await load_from_github(GH_PATH_ECO,   EXTERNAL_ECO)
     PUNISHMENTS = await load_from_github(GH_PATH_PUN,   EXTERNAL_PUN)
     STAFF       = await load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF)
+    DISCORD_DATA = await load_from_github(GH_PATH_DISCORD, EXTERNAL_DISCORD)
     await m.answer("Вы успешно синхронизировали Беседу с Базой данных.")
 
 @bot.on.message(text=["/botstatus", "/botstatus <args>"])
@@ -2443,6 +2461,7 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
     chat_title  = DATABASE.get("chats", {}).get(str(peer_id), {}).get("title", f"Беседа {peer_id}")
     now         = datetime.datetime.now(TZ_MSK)
 
+    tgt_display = None
     if target_id:
         tgt_display  = await get_display_name(target_id, peer_id=peer_id, use_nick=False)
         target_line  = f"\n| Пользователь -- [id{target_id}|MANLIX]"
@@ -2477,6 +2496,85 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
                 )
             except Exception as e:
                 print(f"send_log error to {pid_c}: {e}")
+
+    # --- Discord mirror ---
+    if discord_bot and discord_bot.is_ready():
+        d_target = f"\n| Пользователь -- {tgt_display} (id{target_id})" if target_id else ""
+        d_mute   = f"\n| Мут выдан до: {mute_until}" if mute_until else ""
+        d_nick   = f"\n| Новое имя: {new_nick}" if new_nick else ""
+        d_reason = f"\n| Причина: {reason}" if reason else ""
+
+        d_msg = (
+            f"```\n"
+            f"…::: MNLX LOGS :::…\n\n"
+            f"| Беседа -- {chat_title}\n"
+            f"| CHAT ID -- {peer_id}\n"
+            f"| Действие -- {action}"
+            f"{d_reason}{d_nick}\n\n"
+            f"| Модератор -- {mod_display} (id{moderator_id})"
+            f"{d_target}"
+            f"{d_mute}\n\n"
+            f"| Точное время: {now.strftime('%H:%M:%S')}\n"
+            f"| Дата: {now.strftime('%d/%m/%Y')}\n"
+            f"```"
+        )
+        for gid, cid in list(DISCORD_DATA.get("log_channels", {}).items()):
+            channel = discord_bot.get_channel(int(cid))
+            if channel:
+                try:
+                    await channel.send(d_msg)
+                except Exception as e:
+                    print(f"[Discord] send error to {cid}: {e}")
+
+def setup_discord():
+    global discord_bot
+    if not discord:
+        print("[Discord] discord.py не установлен — логи в Discord недоступны")
+        return
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        print("[Discord] DISCORD_TOKEN не задан — логи в Discord отключены")
+        return
+
+    intents = discord.Intents.default()
+
+    class DiscordLogClient(discord.Client):
+        def __init__(self):
+            super().__init__(intents=intents)
+            self.tree = app_commands.CommandTree(self)
+
+        async def setup_hook(self):
+            @self.tree.command(name="addlogs", description="Установить канал для логов MANLIX")
+            @app_commands.describe(channel="Канал, куда будут приходить логи")
+            @app_commands.checks.has_permissions(administrator=True)
+            async def addlogs(interaction: discord.Interaction, channel: discord.TextChannel):
+                gid = str(interaction.guild_id)
+                cid = str(channel.id)
+                if "log_channels" not in DISCORD_DATA:
+                    DISCORD_DATA["log_channels"] = {}
+                DISCORD_DATA["log_channels"][gid] = cid
+                await push_to_github(DISCORD_DATA, GH_PATH_DISCORD, EXTERNAL_DISCORD)
+                await interaction.response.send_message(
+                    f"✅ Канал {channel.mention} установлен для получения логов MANLIX.",
+                    ephemeral=True
+                )
+
+            await self.tree.sync()
+
+        async def on_ready(self):
+            print(f"[Discord] Бот запущен: {self.user} (ID: {self.user.id})")
+
+    discord_bot = DiscordLogClient()
+
+async def run_discord():
+    if discord_bot is None:
+        setup_discord()
+    if discord_bot is None:
+        return
+    try:
+        await discord_bot.start(os.environ.get("DISCORD_TOKEN"))
+    except Exception as e:
+        print(f"[Discord] Ошибка запуска: {e}")
 
 @bot.on.message(text="/texhelp")
 async def texhelp_cmd(m: Message):
@@ -3566,6 +3664,7 @@ if __name__ == "__main__":
     bot.loop_wrapper.on_startup.append(_init_bot())
     bot.loop_wrapper.add_task(send_reports())
     bot.loop_wrapper.add_task(ban_cleaner())
+    bot.loop_wrapper.add_task(run_discord())
 
     print("Запуск бота через bot.loop_wrapper...")
     bot.run_forever()
