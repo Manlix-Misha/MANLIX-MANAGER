@@ -7,12 +7,6 @@ try:
     import aiomysql
 except ImportError:
     aiomysql = None
-try:
-    import discord
-    from discord import app_commands
-except ImportError:
-    discord = None
-    app_commands = None
 import random
 import asyncio
 import time
@@ -32,13 +26,11 @@ GH_PATH_DB    = "database.json"
 GH_PATH_ECO   = "economy.json"
 GH_PATH_PUN   = "punishments.json"
 GH_PATH_STAFF = "staff.json"
-GH_PATH_DISCORD = "discord.json"
 
 EXTERNAL_DB    = "database.json"
 EXTERNAL_ECO   = "economy.json"
 EXTERNAL_PUN   = "punishments.json"
 EXTERNAL_STAFF = "staff.json"
-EXTERNAL_DISCORD = "discord.json"
 
 TZ_MSK = datetime.timezone(datetime.timedelta(hours=3))
 
@@ -120,6 +112,7 @@ ALT_ALIASES: dict = {
     "bank":          ["банк"],
     "roulette":      ["рулетка", "казино"],
     "duel":          ["дуэль", "сражение"],
+    "addlogs":       ["логи", "вебхук"],
 }
 
 _ALT_REVERSE: dict = {}
@@ -176,7 +169,6 @@ _TABLE_MAP = {
     "economy.json":     "economy",
     "punishments.json": "punishments",
     "staff.json":       "staff",
-    "discord.json":     "discord",
 }
 
 def load_local_data(path: str) -> dict:
@@ -224,7 +216,7 @@ async def _get_db_pool():
 _DB_POOL = None
 
 async def _init_db_pool():
-    global _DB_POOL, DATABASE, ECONOMY, PUNISHMENTS, STAFF, DISCORD_DATA
+    global _DB_POOL, DATABASE, ECONOMY, PUNISHMENTS, STAFF
     _DB_POOL = await _get_db_pool()
     if _DB_POOL is None:
         print("[MySQL] Пул не создан — работаем без MySQL")
@@ -244,14 +236,13 @@ async def _init_db_pool():
         "economy":     "Экономика — деньги, банк, пиво, мини-игры",
         "punishments": "Наказания — глобальные блокировки, локальные баны, муты, варны",
         "staff":       "Руководство — гстаф, тестировщики, тех.специалисты, будущие роли",
-        "discord":     "Discord каналы для логов",
     }
     try:
         async with _DB_POOL.acquire() as conn:
             async with conn.cursor() as cur:
                 for table, comment in table_comments.items():
                     await cur.execute(create_sql.format(table=table, comment=comment))
-        print("[MySQL] Таблицы готовы: chats, economy, punishments, staff, discord")
+        print("[MySQL] Таблицы готовы: chats, economy, punishments, staff")
     except Exception as e:
         print(f"[MySQL] create tables error: {e}")
 
@@ -259,12 +250,10 @@ async def _init_db_pool():
     eco = await load_from_github(GH_PATH_ECO,   EXTERNAL_ECO)
     pun = await load_from_github(GH_PATH_PUN,   EXTERNAL_PUN)
     stf = await load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF)
-    disc = await load_from_github(GH_PATH_DISCORD, EXTERNAL_DISCORD)
     if isinstance(db,  dict): DATABASE    = db
     if isinstance(eco, dict): ECONOMY     = eco
     if isinstance(pun, dict): PUNISHMENTS = pun
     if isinstance(stf, dict): STAFF       = stf
-    if isinstance(disc, dict): DISCORD_DATA = disc
     print("[MySQL] Данные загружены из БД")
 
     for key in ("gbans_status", "gbans_pl", "bans", "warns"):
@@ -282,13 +271,10 @@ async def _init_db_pool():
         STAFF["testers"] = {}
     if "texstaff" not in STAFF:
         STAFF["texstaff"] = {}
-    if "log_channels" not in DISCORD_DATA:
-        DISCORD_DATA["log_channels"] = {}
 
     await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
     await push_to_github(PUNISHMENTS, GH_PATH_PUN, EXTERNAL_PUN)
     await push_to_github(STAFF, GH_PATH_STAFF, EXTERNAL_STAFF)
-    await push_to_github(DISCORD_DATA, GH_PATH_DISCORD, EXTERNAL_DISCORD)
     print("[MySQL] Инициализированные данные сохранены в БД")
 
     tex_count = sum(1 for c in DATABASE.get("chats", {}).values() if c.get("type") == "tex")
@@ -331,10 +317,8 @@ DATABASE    = {}
 ECONOMY     = {}
 PUNISHMENTS = {}
 STAFF       = {}
-DISCORD_DATA = {}
 
 GROUP_ID = None
-discord_bot = None
 
 bot = Bot(token=os.environ.get("TOKEN"))
 
@@ -361,6 +345,8 @@ def ensure_chat(pid: str):
         chat["filter_enabled"] = False
     if "filter_words" not in chat:
         chat["filter_words"] = []
+    if "discord_webhook" not in chat:
+        chat["discord_webhook"] = None
 
 def is_vk_ref(token: str) -> bool:
     if re.search(r"\[id\d+\|", token):
@@ -807,6 +793,11 @@ async def alt_cmd(m: Message, args=None):
             "/server -- сервер\n"
             "/serverinfo -- серверинфо"
         )
+    if w >= 10:
+        msg += (
+            "\n\nКоманды спец. руководителя:\n"
+            "/addlogs -- логи, вебхук"
+        )
     await m.answer(msg)
 
 @bot.on.message(text="/galt")
@@ -928,7 +919,8 @@ async def help_cmd(m: Message):
                 "/sync -- Синхронизация с базой данных.\n"
                 "/botstatus -- Изменить статус Бота.\n"
                 "/chatid -- Узнать айди Беседы.\n"
-                "/delchat -- Удалить чат с Базы данных."
+                "/delchat -- Удалить чат с Базы данных.\n"
+                "/addlogs -- Добавить вебхук Discord для логов."
             )
         await m.answer(gres)
 
@@ -1955,12 +1947,11 @@ async def delchat(m: Message):
 @bot.on.message(text="/sync")
 async def sync(m: Message):
     if not await check_access(m, "Специальный Руководитель"): return
-    global DATABASE, ECONOMY, PUNISHMENTS, STAFF, DISCORD_DATA
+    global DATABASE, ECONOMY, PUNISHMENTS, STAFF
     DATABASE    = await load_from_github(GH_PATH_DB,    EXTERNAL_DB)
     ECONOMY     = await load_from_github(GH_PATH_ECO,   EXTERNAL_ECO)
     PUNISHMENTS = await load_from_github(GH_PATH_PUN,   EXTERNAL_PUN)
     STAFF       = await load_from_github(GH_PATH_STAFF, EXTERNAL_STAFF)
-    DISCORD_DATA = await load_from_github(GH_PATH_DISCORD, EXTERNAL_DISCORD)
     await m.answer("Вы успешно синхронизировали Беседу с Базой данных.")
 
 @bot.on.message(text=["/botstatus", "/botstatus <args>"])
@@ -2461,7 +2452,6 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
     chat_title  = DATABASE.get("chats", {}).get(str(peer_id), {}).get("title", f"Беседа {peer_id}")
     now         = datetime.datetime.now(TZ_MSK)
 
-    tgt_display = None
     if target_id:
         tgt_display  = await get_display_name(target_id, peer_id=peer_id, use_nick=False)
         target_line  = f"\n| Пользователь -- [id{target_id}|MANLIX]"
@@ -2486,6 +2476,8 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
         f"\n\n| Точное время: {now.strftime('%H:%M:%S')}"
         f"\n| Дата: {now.strftime('%d/%m/%Y')}"
     )
+    
+    # Отправка в VK беседы с типом logs
     for pid_c, chat in list(DATABASE.get("chats", {}).items()):
         if chat.get("type") == "logs":
             try:
@@ -2496,85 +2488,141 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
                 )
             except Exception as e:
                 print(f"send_log error to {pid_c}: {e}")
+    
+    # Отправка в Discord вебхук
+    await send_discord_log(str(peer_id), msg, action, mod_display, chat_title, now)
 
-    # --- Discord mirror ---
-    if discord_bot and discord_bot.is_ready():
-        d_target = f"\n| Пользователь -- {tgt_display} (id{target_id})" if target_id else ""
-        d_mute   = f"\n| Мут выдан до: {mute_until}" if mute_until else ""
-        d_nick   = f"\n| Новое имя: {new_nick}" if new_nick else ""
-        d_reason = f"\n| Причина: {reason}" if reason else ""
-
-        d_msg = (
-            f"```\n"
-            f"…::: MNLX LOGS :::…\n\n"
-            f"| Беседа -- {chat_title}\n"
-            f"| CHAT ID -- {peer_id}\n"
-            f"| Действие -- {action}"
-            f"{d_reason}{d_nick}\n\n"
-            f"| Модератор -- {mod_display} (id{moderator_id})"
-            f"{d_target}"
-            f"{d_mute}\n\n"
-            f"| Точное время: {now.strftime('%H:%M:%S')}\n"
-            f"| Дата: {now.strftime('%d/%m/%Y')}\n"
-            f"```"
-        )
-        for gid, cid in list(DISCORD_DATA.get("log_channels", {}).items()):
-            channel = discord_bot.get_channel(int(cid))
-            if channel:
-                try:
-                    await channel.send(d_msg)
-                except Exception as e:
-                    print(f"[Discord] send error to {cid}: {e}")
-
-def setup_discord():
-    global discord_bot
-    if not discord:
-        print("[Discord] discord.py не установлен — логи в Discord недоступны")
+async def send_discord_log(pid: str, msg: str, action: str, mod_display: str, chat_title: str, now: datetime.datetime):
+    """Отправляет логи в Discord через вебхук"""
+    webhook_url = DATABASE.get("chats", {}).get(pid, {}).get("discord_webhook")
+    if not webhook_url:
         return
-    token = os.environ.get("DISCORD_TOKEN")
-    if not token:
-        print("[Discord] DISCORD_TOKEN не задан — логи в Discord отключены")
-        return
-
-    intents = discord.Intents.default()
-
-    class DiscordLogClient(discord.Client):
-        def __init__(self):
-            super().__init__(intents=intents)
-            self.tree = app_commands.CommandTree(self)
-
-        async def setup_hook(self):
-            @self.tree.command(name="addlogs", description="Установить канал для логов MANLIX")
-            @app_commands.describe(channel="Канал, куда будут приходить логи")
-            @app_commands.checks.has_permissions(administrator=True)
-            async def addlogs(interaction: discord.Interaction, channel: discord.TextChannel):
-                gid = str(interaction.guild_id)
-                cid = str(channel.id)
-                if "log_channels" not in DISCORD_DATA:
-                    DISCORD_DATA["log_channels"] = {}
-                DISCORD_DATA["log_channels"][gid] = cid
-                await push_to_github(DISCORD_DATA, GH_PATH_DISCORD, EXTERNAL_DISCORD)
-                await interaction.response.send_message(
-                    f"✅ Канал {channel.mention} установлен для получения логов MANLIX.",
-                    ephemeral=True
-                )
-
-            await self.tree.sync()
-
-        async def on_ready(self):
-            print(f"[Discord] Бот запущен: {self.user} (ID: {self.user.id})")
-
-    discord_bot = DiscordLogClient()
-
-async def run_discord():
-    if discord_bot is None:
-        setup_discord()
-    if discord_bot is None:
-        return
+    
     try:
-        await discord_bot.start(os.environ.get("DISCORD_TOKEN"))
+        import aiohttp
+        
+        # Формируем embed для красивого отображения в Discord
+        color_map = {
+            "Мут": 0xFF0000,
+            "Снятие мута": 0x00FF00,
+            "Исключение": 0xFF6600,
+            "Блокировка": 0x8B0000,
+            "Снятие Блокировки": 0x00FF00,
+            "Предупреждение": 0xFFFF00,
+            "Выдача ника": 0x00FFFF,
+            "Снятие ника": 0xFF00FF,
+            "Снятие всех ников": 0xFF00FF,
+        }
+        
+        embed = {
+            "title": f"📝 {action}",
+            "description": msg,
+            "color": color_map.get(action, 0x7289DA),
+            "footer": {
+                "text": f"MANLIX MANAGER | {now.strftime('%d/%m/%Y %H:%M:%S')}"
+            },
+            "fields": [
+                {
+                    "name": "Беседа",
+                    "value": chat_title,
+                    "inline": True
+                },
+                {
+                    "name": "Модератор",
+                    "value": mod_display,
+                    "inline": True
+                }
+            ]
+        }
+        
+        payload = {
+            "username": "MANLIX LOGS",
+            "avatar_url": "https://vk.com/images/community_100.png",
+            "embeds": [embed]
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(webhook_url, json=payload) as resp:
+                if resp.status not in (200, 204):
+                    print(f"[Discord] Ошибка отправки: {resp.status}")
+                    
+    except ImportError:
+        print("[Discord] aiohttp не установлен, пропускаем отправку в Discord")
     except Exception as e:
-        print(f"[Discord] Ошибка запуска: {e}")
+        print(f"[Discord] Ошибка отправки лога: {e}")
+
+@bot.on.message(text=["/addlogs", "/addlogs <args>"])
+async def addlogs_cmd(m: Message, args=None):
+    """Установка/удаление вебхука Discord для логов"""
+    if not await check_access(m, "Специальный Руководитель"): return
+    
+    pid = str(m.peer_id)
+    ensure_chat(pid)
+    
+    # Если аргументов нет — показываем текущий статус
+    if not args or not args.strip():
+        current_webhook = DATABASE["chats"][pid].get("discord_webhook")
+        if current_webhook:
+            # Скрываем полный URL для безопасности
+            masked = current_webhook[:30] + "..." + current_webhook[-10:] if len(current_webhook) > 40 else current_webhook
+            return await m.answer(
+                f"Вебхук Discord установлен.\n"
+                f"URL: {masked}\n\n"
+                f"Чтобы удалить: /addlogs remove"
+            )
+        else:
+            return await m.answer(
+                "Вебхук Discord не установлен.\n\n"
+                "Использование: /addlogs [URL вебхука]\n"
+                "Пример: /addlogs https://discord.com/api/webhooks/123456/abcdef\n\n"
+                "Чтобы удалить: /addlogs remove"
+            )
+    
+    # Удаление вебхука
+    if args.strip().lower() == "remove":
+        if DATABASE["chats"][pid].get("discord_webhook"):
+            DATABASE["chats"][pid]["discord_webhook"] = None
+            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+            return await m.answer("Вебхук Discord успешно удален.")
+        else:
+            return await m.answer("Вебхук Discord не был установлен.")
+    
+    # Установка нового вебхука
+    webhook_url = args.strip()
+    
+    # Простая валидация URL
+    if not webhook_url.startswith(("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")):
+        return await m.answer(
+            "Неверный формат вебхука.\n"
+            "URL должен начинаться с https://discord.com/api/webhooks/\n"
+            "Получить его можно в настройках канала Discord -> Интеграции -> Вебхуки"
+        )
+    
+    # Проверяем валидность вебхука тестовым запросом
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(webhook_url) as resp:
+                if resp.status == 200:
+                    webhook_data = await resp.json()
+                    channel_name = webhook_data.get("name", "Unknown")
+                else:
+                    return await m.answer(f"Не удалось проверить вебхук. Код ответа: {resp.status}")
+    except ImportError:
+        # Если aiohttp нет, пропускаем проверку
+        channel_name = "Unknown"
+    except Exception as e:
+        return await m.answer(f"Ошибка проверки вебхука: {e}")
+    
+    DATABASE["chats"][pid]["discord_webhook"] = webhook_url
+    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
+    
+    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
+    await m.answer(
+        f"[id{m.from_id}|{a_display}] установил вебхук Discord для логов.\n"
+        f"Канал: {channel_name}\n\n"
+        f"Теперь все логи будут дублироваться в этот канал Discord."
+    )
 
 @bot.on.message(text="/texhelp")
 async def texhelp_cmd(m: Message):
@@ -2992,10 +3040,233 @@ async def transfer(m: Message, args=None):
             return await m.answer("Укажите сумму. Пример: /перевести 100")
     else:
         if not args:
-            return await m.answer("Формат: /перевести [ссылка] [сумма]\nИли ответом на сообщение: /перевести [сумма]")
+            return await m.answer("Формат: /перевести [ссылка/упоминание] [сумма]\nИли ответом на сообщение: /перевести [сумма]")
         parts = args.split()
         if len(parts) < 2:
-            return await m.answer("Формат: /перевести [ссылка] [сумма]")
+            return await m.answer("Формат: /перевести [ссылка/упоминание] [сумма]")
+        t = await get_target_id(m, parts[0])
+        if not t:
+            return await m.answer("Не удалось определить получателя.")
+        try:
+            amount = int(parts[1])
+            if amount <= 0: raise ValueError
+        except:
+            return await m.answer("Некорректная сумма.")
+    uid = str(m.from_id)
+    rid = str(t)
+    if uid not in ECONOMY: ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
+    if rid not in ECONOMY: ECONOMY[rid] = {"cash": 0, "bank": 0, "last": 0}
+    if ECONOMY[uid].get("bank", 0) < amount:
+        return await m.answer(f"Недостаточно средств на счете (есть {ECONOMY[uid].get('bank', 0)}$)")
+    ECONOMY[uid]["bank"] -= amount
+    ECONOMY[uid]["transfers_out"] = ECONOMY[uid].get("transfers_out", 0) + amount
+    ECONOMY[rid]["bank"] += amount
+    ECONOMY[rid]["transfers_in"] = ECONOMY[rid].get("transfers_in", 0) + amount
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
+    await m.answer(f"💲Вы перевели [id{t}|{t_display}] {amount}$")
+
+@bot.on.message(text=["/roulette <amount>"])
+async def roulette(m: Message, amount=None):
+    try:
+        amount = int(amount)
+        if amount <= 0: raise ValueError
+    except:
+        return await m.answer("Укажите положительную сумму.")
+    uid = str(m.from_id)
+    if uid not in ECONOMY or ECONOMY[uid].get("cash", 0) < amount:
+        return await m.answer("Недостаточно наличных.")
+    ECONOMY[uid]["cash"] -= amount
+    if random.random() < 0.25:
+        win = amount * 3
+        ECONOMY[uid]["cash"] += win
+        text = (
+            f"🎰Вы выиграли ставку в размере {win}$\n\n"
+            f"(Ставка: {amount})"
+        )
+    else:
+        text = (
+            f"🎰 Вы проиграли ставку в размере {amount}$\n\n"
+            f"🎮 Попробуйте снова!"
+        )
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+    await m.answer(text)
+
+@bot.on.message(text=["/duel <amount>"])
+async def duel_create(m: Message, amount=None):
+    try:
+        amount = int(amount)
+        if amount <= 0: raise ValueError
+    except:
+        return await m.answer("Укажите положительную сумму.")
+    uid = str(m.from_id)
+    pid = str(m.peer_id)
+    if uid not in ECONOMY or ECONOMY[uid].get("cash", 0) < amount:
+        return await m.answer("Недостаточно наличных средств.")
+    duel_id = f"{pid}_{int(time.time())}"
+    DATABASE["duels"][duel_id] = {
+        " 0}
+    if "pivo" not in ECONOMY[uid]:
+        ECONOMY[uid]["pivo"] = {"total": 0.0, "last": 0, "month": "", "month_total": 0.0}
+
+    pivo = ECONOMY[uid]["pivo"]
+
+    if now - pivo.get("last", 0) < 3600:
+        return await m.answer("🍺 Следующая попытка через час.")
+
+    amount = round(random.choice([x / 10 for x in range(1, 31)]), 1)
+
+    current_month = datetime.datetime.now(TZ_MSK).strftime("%Y-%m")
+    if pivo.get("month") != current_month:
+        pivo["month"] = current_month
+        pivo["month_total"] = 0.0
+
+    pivo["total"]       = round(pivo.get("total", 0.0) + amount, 1)
+    pivo["month_total"] = round(pivo.get("month_total", 0.0) + amount, 1)
+    pivo["last"]        = now
+
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+
+    name = await get_display_name(m.from_id, peer_id=m.peer_id, use_nick=False)
+    await m.answer(
+        f"[id{m.from_id}|{name}], ты выпил {amount} литра пива!\n\n"
+        f"Выпито всего - {pivo['total']} л. 🍻\n"
+        f"Следующая попытка через час."
+    )
+
+@bot.on.message(text="/пивозавры")
+async def pivozavry_cmd(m: Message):
+    now_dt        = datetime.datetime.now(TZ_MSK)
+    current_month = now_dt.strftime("%Y-%m")
+    month_name    = now_dt.strftime("%B %Y")
+
+    leaders = []
+    for uid, eco in ECONOMY.items():
+        pivo = eco.get("pivo")
+        if not pivo:
+            continue
+        if pivo.get("month") != current_month:
+            continue
+        month_total = pivo.get("month_total", 0.0)
+        if month_total > 0:
+            leaders.append((uid, month_total))
+
+    leaders.sort(key=lambda x: x[1], reverse=True)
+
+    if not leaders:
+        return await m.answer(f"🍺 Топ пивозавров за {month_name}:\n\nПока никто не пил пиво.")
+
+    msg = f"Топ пивозавров за {month_name}:\n\n"
+    for i, (uid, total) in enumerate(leaders[:10], 1):
+        name = await get_display_name(int(uid), peer_id=m.peer_id, use_nick=False)
+        msg += f"{i}. [id{uid}|{name}]  Выпито - {total} литров.\n"
+
+    await m.answer(msg.strip())
+
+@bot.on.message(text="/ghelp")
+async def ghelp_cmd(m: Message):
+    await m.answer(
+        "🎮 Игровые команды MANLIX:\n\n"
+        "/prise – получить приз.\n"
+        "/balance – Баланс наличных средств.\n"
+        "/bank – MANLIX BANK 🏦.\n"
+        "/положить – положить средства на Банковский счет.\n"
+        "/снять – снять средства с Банковского счета.\n"
+        "/перевести – перевести средства на другой Банковский счет.\n"
+        "/roulette – игра в рулетку.\n"
+        "/duel – дуэль."
+    )
+
+@bot.on.message(text="/prise")
+async def prise(m: Message):
+    uid = str(m.from_id)
+    if uid not in ECONOMY:
+        ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
+    if time.time() - ECONOMY[uid].get("last", 0) < 3600:
+        return await m.answer("🎉 Приз можно получить раз в час!")
+    win = random.randint(10, 100)
+    ECONOMY[uid]["cash"] += win
+    ECONOMY[uid]["last"]  = time.time()
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+    await m.answer(f"🎉Ты получил(-а) {win}$!")
+
+@bot.on.message(text=["/balance", "/balance <args>"])
+async def balance_cmd(m: Message, args=None):
+    t = None
+    if getattr(m, "reply_message", None):
+        t = m.reply_message.from_id
+    elif args:
+        t = await get_target_id(m, args)
+    if not t:
+        t = m.from_id
+    uid   = str(t)
+    eco   = ECONOMY.get(uid, {})
+    cash  = eco.get("cash", 0)
+    bank  = eco.get("bank", 0)
+    total = cash + bank
+    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
+    await m.answer(f"💰Общий баланс [id{t}|{t_display}]: {total}$")
+
+@bot.on.message(text="/bank")
+async def bank_cmd(m: Message):
+    uid  = str(m.from_id)
+    cash = ECONOMY.get(uid, {}).get("cash", 0)
+    bank = ECONOMY.get(uid, {}).get("bank", 0)
+    await m.answer(
+        f"🏦 …::: MANLIX BANK :::…\n\n"
+        f"| Наличные: {cash}$\n"
+        f"| На счету: {bank}$"
+    )
+
+@bot.on.message(text=["/положить <amount>"])
+async def polozhit(m: Message, amount=None):
+    try:
+        amount = int(amount)
+        if amount <= 0: raise ValueError
+    except:
+        return await m.answer("Укажите положительную сумму.")
+    uid = str(m.from_id)
+    if uid not in ECONOMY:
+        ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
+    if ECONOMY[uid].get("cash", 0) < amount:
+        return await m.answer("Недостаточно наличных.")
+    ECONOMY[uid]["cash"] -= amount
+    ECONOMY[uid]["bank"] += amount
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+    await m.answer(f"💲Вы положили на своей счет {amount}$")
+
+@bot.on.message(text=["/снять <amount>"])
+async def snyat(m: Message, amount=None):
+    try:
+        amount = int(amount)
+        if amount <= 0: raise ValueError
+    except:
+        return await m.answer("Укажите положительную сумму.")
+    uid = str(m.from_id)
+    if uid not in ECONOMY:
+        ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
+    if ECONOMY[uid].get("bank", 0) < amount:
+        return await m.answer("Недостаточно средств на счете.")
+    ECONOMY[uid]["bank"] -= amount
+    ECONOMY[uid]["cash"] += amount
+    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
+    await m.answer(f"💲Вы сняли со своего счета {amount}$")
+
+@bot.on.message(text=["/перевести", "/перевести <args>"])
+async def transfer(m: Message, args=None):
+    if getattr(m, "reply_message", None):
+        t = m.reply_message.from_id
+        try:
+            amount = int((args or "").strip())
+            if amount <= 0: raise ValueError
+        except:
+            return await m.answer("Укажите сумму. Пример: /перевести 100")
+    else:
+        if not args:
+            return await m.answer("Формат: /перевести [ссылка/упоминание] [сумма]\nИли ответом на сообщение: /перевести [сумма]")
+        parts = args.split()
+        if len(parts) < 2:
+            return await m.answer("Формат: /перевести [ссылка/упоминание] [сумма]")
         t = await get_target_id(m, parts[0])
         if not t:
             return await m.answer("Не удалось определить получателя.")
@@ -3664,7 +3935,6 @@ if __name__ == "__main__":
     bot.loop_wrapper.on_startup.append(_init_bot())
     bot.loop_wrapper.add_task(send_reports())
     bot.loop_wrapper.add_task(ban_cleaner())
-    bot.loop_wrapper.add_task(run_discord())
 
     print("Запуск бота через bot.loop_wrapper...")
     bot.run_forever()
