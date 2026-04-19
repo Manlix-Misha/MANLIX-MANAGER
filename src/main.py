@@ -447,7 +447,7 @@ def get_user_info(peer_id, user_id):
         all_local = [entry[0]]
         if len(entry) > 2 and isinstance(entry[2], list):
             all_local += entry[2]
-        local_role = max(all_u_roles, key=lambda r: RANK_WEIGHT.get(r, 0))
+        local_role = max(all_local, key=lambda r: RANK_WEIGHT.get(r, 0))
         nick       = entry[1]
     else:
         local_role = "Пользователь"
@@ -1564,7 +1564,6 @@ async def removerole(m: Message, args=None):
         t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer(f"У [id{t}|{t_display}] нет ролей в этой беседе.")
 
-    # СОХРАНЯЕМ НИК ПРИ УДАЛЕНИИ РОЛИ
     current_entry = DATABASE["chats"][pid]["staff"][uid]
     current_nick = current_entry[1] if len(current_entry) > 1 else None
 
@@ -1574,7 +1573,6 @@ async def removerole(m: Message, args=None):
             return await m.answer(f"У [id{t}|{t_display}] нет роли «{role_to_remove}».")
         all_roles.remove(role_to_remove)
         if not all_roles:
-            # Удаляем все роли, но СОХРАНЯЕМ ник в staff как Пользователь с ником
             if current_nick:
                 DATABASE["chats"][pid]["staff"][uid] = ["Пользователь", current_nick, []]
             else:
@@ -1587,7 +1585,6 @@ async def removerole(m: Message, args=None):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
         await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|{t_display}]")
     else:
-        # Удаляем все роли, но СОХРАНЯЕМ ник в staff как Пользователь с ником
         if current_nick:
             DATABASE["chats"][pid]["staff"][uid] = ["Пользователь", current_nick, []]
         else:
@@ -2477,7 +2474,6 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
         f"\n| Дата: {now.strftime('%d/%m/%Y')}"
     )
     
-    # Отправка в VK беседы с типом logs
     for pid_c, chat in list(DATABASE.get("chats", {}).items()):
         if chat.get("type") == "logs":
             try:
@@ -2488,12 +2484,8 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
                 )
             except Exception as e:
                 print(f"send_log error to {pid_c}: {e}")
-    
-    # Отправка в Discord вебхук
-    await send_discord_log(str(peer_id), msg, action, mod_display, chat_title, now)
 
 async def send_discord_log(pid: str, msg: str, action: str, mod_display: str, chat_title: str, now: datetime.datetime):
-    """Отправляет логи в Discord через вебхук"""
     webhook_url = DATABASE.get("chats", {}).get(pid, {}).get("discord_webhook")
     if not webhook_url:
         return
@@ -2501,7 +2493,6 @@ async def send_discord_log(pid: str, msg: str, action: str, mod_display: str, ch
     try:
         import aiohttp
         
-        # Формируем embed для красивого отображения в Discord
         color_map = {
             "Мут": 0xFF0000,
             "Снятие мута": 0x00FF00,
@@ -2553,17 +2544,14 @@ async def send_discord_log(pid: str, msg: str, action: str, mod_display: str, ch
 
 @bot.on.message(text=["/addlogs", "/addlogs <args>"])
 async def addlogs_cmd(m: Message, args=None):
-    """Установка/удаление вебхука Discord для логов"""
     if not await check_access(m, "Специальный Руководитель"): return
     
     pid = str(m.peer_id)
     ensure_chat(pid)
     
-    # Если аргументов нет — показываем текущий статус
     if not args or not args.strip():
         current_webhook = DATABASE["chats"][pid].get("discord_webhook")
         if current_webhook:
-            # Скрываем полный URL для безопасности
             masked = current_webhook[:30] + "..." + current_webhook[-10:] if len(current_webhook) > 40 else current_webhook
             return await m.answer(
                 f"Вебхук Discord установлен.\n"
@@ -2578,7 +2566,6 @@ async def addlogs_cmd(m: Message, args=None):
                 "Чтобы удалить: /addlogs remove"
             )
     
-    # Удаление вебхука
     if args.strip().lower() == "remove":
         if DATABASE["chats"][pid].get("discord_webhook"):
             DATABASE["chats"][pid]["discord_webhook"] = None
@@ -2587,10 +2574,8 @@ async def addlogs_cmd(m: Message, args=None):
         else:
             return await m.answer("Вебхук Discord не был установлен.")
     
-    # Установка нового вебхука
     webhook_url = args.strip()
     
-    # Простая валидация URL
     if not webhook_url.startswith(("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")):
         return await m.answer(
             "Неверный формат вебхука.\n"
@@ -2598,7 +2583,6 @@ async def addlogs_cmd(m: Message, args=None):
             "Получить его можно в настройках канала Discord -> Интеграции -> Вебхуки"
         )
     
-    # Проверяем валидность вебхука тестовым запросом
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
@@ -2609,7 +2593,6 @@ async def addlogs_cmd(m: Message, args=None):
                 else:
                     return await m.answer(f"Не удалось проверить вебхук. Код ответа: {resp.status}")
     except ImportError:
-        # Если aiohttp нет, пропускаем проверку
         channel_name = "Unknown"
     except Exception as e:
         return await m.answer(f"Ошибка проверки вебхука: {e}")
@@ -2695,7 +2678,6 @@ async def get_info_cmd(m: Message, args=None):
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     uid = str(t)
     
-    # ИСПРАВЛЕНО: используем правильный ключ "chats" вместо "чаты"
     owner_count = 0
     for chat_pid, chat_data in DATABASE.get("chats", {}).items():
         staff = chat_data.get("staff", {})
@@ -2883,229 +2865,6 @@ async def pivo_cmd(m: Message):
 
     if uid not in ECONOMY:
         ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
-    if "pivo" not in ECONOMY[uid]:
-        ECONOMY[uid]["pivo"] = {"total": 0.0, "last": 0, "month": "", "month_total": 0.0}
-
-    pivo = ECONOMY[uid]["pivo"]
-
-    if now - pivo.get("last", 0) < 3600:
-        return await m.answer("🍺 Следующая попытка через час.")
-
-    amount = round(random.choice([x / 10 for x in range(1, 31)]), 1)
-
-    current_month = datetime.datetime.now(TZ_MSK).strftime("%Y-%m")
-    if pivo.get("month") != current_month:
-        pivo["month"] = current_month
-        pivo["month_total"] = 0.0
-
-    pivo["total"]       = round(pivo.get("total", 0.0) + amount, 1)
-    pivo["month_total"] = round(pivo.get("month_total", 0.0) + amount, 1)
-    pivo["last"]        = now
-
-    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-
-    name = await get_display_name(m.from_id, peer_id=m.peer_id, use_nick=False)
-    await m.answer(
-        f"[id{m.from_id}|{name}], ты выпил {amount} литра пива!\n\n"
-        f"Выпито всего - {pivo['total']} л. 🍻\n"
-        f"Следующая попытка через час."
-    )
-
-@bot.on.message(text="/пивозавры")
-async def pivozavry_cmd(m: Message):
-    now_dt        = datetime.datetime.now(TZ_MSK)
-    current_month = now_dt.strftime("%Y-%m")
-    month_name    = now_dt.strftime("%B %Y")
-
-    leaders = []
-    for uid, eco in ECONOMY.items():
-        pivo = eco.get("pivo")
-        if not pivo:
-            continue
-        if pivo.get("month") != current_month:
-            continue
-        month_total = pivo.get("month_total", 0.0)
-        if month_total > 0:
-            leaders.append((uid, month_total))
-
-    leaders.sort(key=lambda x: x[1], reverse=True)
-
-    if not leaders:
-        return await m.answer(f"🍺 Топ пивозавров за {month_name}:\n\nПока никто не пил пиво.")
-
-    msg = f"Топ пивозавров за {month_name}:\n\n"
-    for i, (uid, total) in enumerate(leaders[:10], 1):
-        name = await get_display_name(int(uid), peer_id=m.peer_id, use_nick=False)
-        msg += f"{i}. [id{uid}|{name}]  Выпито - {total} литров.\n"
-
-    await m.answer(msg.strip())
-
-@bot.on.message(text="/ghelp")
-async def ghelp_cmd(m: Message):
-    await m.answer(
-        "🎮 Игровые команды MANLIX:\n\n"
-        "/prise – получить приз.\n"
-        "/balance – Баланс наличных средств.\n"
-        "/bank – MANLIX BANK 🏦.\n"
-        "/положить – положить средства на Банковский счет.\n"
-        "/снять – снять средства с Банковского счета.\n"
-        "/перевести – перевести средства на другой Банковский счет.\n"
-        "/roulette – игра в рулетку.\n"
-        "/duel – дуэль."
-    )
-
-@bot.on.message(text="/prise")
-async def prise(m: Message):
-    uid = str(m.from_id)
-    if uid not in ECONOMY:
-        ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
-    if time.time() - ECONOMY[uid].get("last", 0) < 3600:
-        return await m.answer("🎉 Приз можно получить раз в час!")
-    win = random.randint(10, 100)
-    ECONOMY[uid]["cash"] += win
-    ECONOMY[uid]["last"]  = time.time()
-    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(f"🎉Ты получил(-а) {win}$!")
-
-@bot.on.message(text=["/balance", "/balance <args>"])
-async def balance_cmd(m: Message, args=None):
-    t = None
-    if getattr(m, "reply_message", None):
-        t = m.reply_message.from_id
-    elif args:
-        t = await get_target_id(m, args)
-    if not t:
-        t = m.from_id
-    uid   = str(t)
-    eco   = ECONOMY.get(uid, {})
-    cash  = eco.get("cash", 0)
-    bank  = eco.get("bank", 0)
-    total = cash + bank
-    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"💰Общий баланс [id{t}|{t_display}]: {total}$")
-
-@bot.on.message(text="/bank")
-async def bank_cmd(m: Message):
-    uid  = str(m.from_id)
-    cash = ECONOMY.get(uid, {}).get("cash", 0)
-    bank = ECONOMY.get(uid, {}).get("bank", 0)
-    await m.answer(
-        f"🏦 …::: MANLIX BANK :::…\n\n"
-        f"| Наличные: {cash}$\n"
-        f"| На счету: {bank}$"
-    )
-
-@bot.on.message(text=["/положить <amount>"])
-async def polozhit(m: Message, amount=None):
-    try:
-        amount = int(amount)
-        if amount <= 0: raise ValueError
-    except:
-        return await m.answer("Укажите положительную сумму.")
-    uid = str(m.from_id)
-    if uid not in ECONOMY:
-        ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
-    if ECONOMY[uid].get("cash", 0) < amount:
-        return await m.answer("Недостаточно наличных.")
-    ECONOMY[uid]["cash"] -= amount
-    ECONOMY[uid]["bank"] += amount
-    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(f"💲Вы положили на своей счет {amount}$")
-
-@bot.on.message(text=["/снять <amount>"])
-async def snyat(m: Message, amount=None):
-    try:
-        amount = int(amount)
-        if amount <= 0: raise ValueError
-    except:
-        return await m.answer("Укажите положительную сумму.")
-    uid = str(m.from_id)
-    if uid not in ECONOMY:
-        ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
-    if ECONOMY[uid].get("bank", 0) < amount:
-        return await m.answer("Недостаточно средств на счете.")
-    ECONOMY[uid]["bank"] -= amount
-    ECONOMY[uid]["cash"] += amount
-    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(f"💲Вы сняли со своего счета {amount}$")
-
-@bot.on.message(text=["/перевести", "/перевести <args>"])
-async def transfer(m: Message, args=None):
-    if getattr(m, "reply_message", None):
-        t = m.reply_message.from_id
-        try:
-            amount = int((args or "").strip())
-            if amount <= 0: raise ValueError
-        except:
-            return await m.answer("Укажите сумму. Пример: /перевести 100")
-    else:
-        if not args:
-            return await m.answer("Формат: /перевести [ссылка/упоминание] [сумма]\nИли ответом на сообщение: /перевести [сумма]")
-        parts = args.split()
-        if len(parts) < 2:
-            return await m.answer("Формат: /перевести [ссылка/упоминание] [сумма]")
-        t = await get_target_id(m, parts[0])
-        if not t:
-            return await m.answer("Не удалось определить получателя.")
-        try:
-            amount = int(parts[1])
-            if amount <= 0: raise ValueError
-        except:
-            return await m.answer("Некорректная сумма.")
-    uid = str(m.from_id)
-    rid = str(t)
-    if uid not in ECONOMY: ECONOMY[uid] = {"cash": 0, "bank": 0, "last": 0}
-    if rid not in ECONOMY: ECONOMY[rid] = {"cash": 0, "bank": 0, "last": 0}
-    if ECONOMY[uid].get("bank", 0) < amount:
-        return await m.answer(f"Недостаточно средств на счете (есть {ECONOMY[uid].get('bank', 0)}$)")
-    ECONOMY[uid]["bank"] -= amount
-    ECONOMY[uid]["transfers_out"] = ECONOMY[uid].get("transfers_out", 0) + amount
-    ECONOMY[rid]["bank"] += amount
-    ECONOMY[rid]["transfers_in"] = ECONOMY[rid].get("transfers_in", 0) + amount
-    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
-    await m.answer(f"💲Вы перевели [id{t}|{t_display}] {amount}$")
-
-@bot.on.message(text=["/roulette <amount>"])
-async def roulette(m: Message, amount=None):
-    try:
-        amount = int(amount)
-        if amount <= 0: raise ValueError
-    except:
-        return await m.answer("Укажите положительную сумму.")
-    uid = str(m.from_id)
-    if uid not in ECONOMY or ECONOMY[uid].get("cash", 0) < amount:
-        return await m.answer("Недостаточно наличных.")
-    ECONOMY[uid]["cash"] -= amount
-    if random.random() < 0.25:
-        win = amount * 3
-        ECONOMY[uid]["cash"] += win
-        text = (
-            f"🎰Вы выиграли ставку в размере {win}$\n\n"
-            f"(Ставка: {amount})"
-        )
-    else:
-        text = (
-            f"🎰 Вы проиграли ставку в размере {amount}$\n\n"
-            f"🎮 Попробуйте снова!"
-        )
-    await push_to_github(ECONOMY, GH_PATH_ECO, EXTERNAL_ECO)
-    await m.answer(text)
-
-@bot.on.message(text=["/duel <amount>"])
-async def duel_create(m: Message, amount=None):
-    try:
-        amount = int(amount)
-        if amount <= 0: raise ValueError
-    except:
-        return await m.answer("Укажите положительную сумму.")
-    uid = str(m.from_id)
-    pid = str(m.peer_id)
-    if uid not in ECONOMY or ECONOMY[uid].get("cash", 0) < amount:
-        return await m.answer("Недостаточно наличных средств.")
-    duel_id = f"{pid}_{int(time.time())}"
-    DATABASE["duels"][duel_id] = {
-        " 0}
     if "pivo" not in ECONOMY[uid]:
         ECONOMY[uid]["pivo"] = {"total": 0.0, "last": 0, "month": "", "month_total": 0.0}
 
