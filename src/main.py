@@ -112,7 +112,6 @@ ALT_ALIASES: dict = {
     "bank":          ["банк"],
     "roulette":      ["рулетка", "казино"],
     "duel":          ["дуэль", "сражение"],
-    "addlogs":       ["логи", "вебхук"],
 }
 
 _ALT_REVERSE: dict = {}
@@ -345,8 +344,6 @@ def ensure_chat(pid: str):
         chat["filter_enabled"] = False
     if "filter_words" not in chat:
         chat["filter_words"] = []
-    if "discord_webhook" not in chat:
-        chat["discord_webhook"] = None
 
 def is_vk_ref(token: str) -> bool:
     if re.search(r"\[id\d+\|", token):
@@ -793,11 +790,6 @@ async def alt_cmd(m: Message, args=None):
             "/server -- сервер\n"
             "/serverinfo -- серверинфо"
         )
-    if w >= 10:
-        msg += (
-            "\n\nКоманды спец. руководителя:\n"
-            "/addlogs -- логи, вебхук"
-        )
     await m.answer(msg)
 
 @bot.on.message(text="/galt")
@@ -919,8 +911,7 @@ async def help_cmd(m: Message):
                 "/sync -- Синхронизация с базой данных.\n"
                 "/botstatus -- Изменить статус Бота.\n"
                 "/chatid -- Узнать айди Беседы.\n"
-                "/delchat -- Удалить чат с Базы данных.\n"
-                "/addlogs -- Добавить вебхук Discord для логов."
+                "/delchat -- Удалить чат с Базы данных."
             )
         await m.answer(gres)
 
@@ -1564,6 +1555,7 @@ async def removerole(m: Message, args=None):
         t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
         return await m.answer(f"У [id{t}|{t_display}] нет ролей в этой беседе.")
 
+    # СОХРАНЯЕМ НИК ПРИ УДАЛЕНИИ РОЛИ
     current_entry = DATABASE["chats"][pid]["staff"][uid]
     current_nick = current_entry[1] if len(current_entry) > 1 else None
 
@@ -1573,6 +1565,7 @@ async def removerole(m: Message, args=None):
             return await m.answer(f"У [id{t}|{t_display}] нет роли «{role_to_remove}».")
         all_roles.remove(role_to_remove)
         if not all_roles:
+            # Удаляем все роли, но СОХРАНЯЕМ ник в staff как Пользователь с ником
             if current_nick:
                 DATABASE["chats"][pid]["staff"][uid] = ["Пользователь", current_nick, []]
             else:
@@ -1585,6 +1578,7 @@ async def removerole(m: Message, args=None):
         await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
         await m.answer(f"[id{m.from_id}|{a_display}] снял(-а) уровень прав [id{t}|{t_display}]")
     else:
+        # Удаляем все роли, но СОХРАНЯЕМ ник в staff как Пользователь с ником
         if current_nick:
             DATABASE["chats"][pid]["staff"][uid] = ["Пользователь", current_nick, []]
         else:
@@ -2473,7 +2467,6 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
         f"\n\n| Точное время: {now.strftime('%H:%M:%S')}"
         f"\n| Дата: {now.strftime('%d/%m/%Y')}"
     )
-    
     for pid_c, chat in list(DATABASE.get("chats", {}).items()):
         if chat.get("type") == "logs":
             try:
@@ -2484,128 +2477,6 @@ async def send_log(peer_id: int, moderator_id: int, action: str,
                 )
             except Exception as e:
                 print(f"send_log error to {pid_c}: {e}")
-
-async def send_discord_log(pid: str, msg: str, action: str, mod_display: str, chat_title: str, now: datetime.datetime):
-    webhook_url = DATABASE.get("chats", {}).get(pid, {}).get("discord_webhook")
-    if not webhook_url:
-        return
-    
-    try:
-        import aiohttp
-        
-        color_map = {
-            "Мут": 0xFF0000,
-            "Снятие мута": 0x00FF00,
-            "Исключение": 0xFF6600,
-            "Блокировка": 0x8B0000,
-            "Снятие Блокировки": 0x00FF00,
-            "Предупреждение": 0xFFFF00,
-            "Выдача ника": 0x00FFFF,
-            "Снятие ника": 0xFF00FF,
-            "Снятие всех ников": 0xFF00FF,
-        }
-        
-        embed = {
-            "title": f"📝 {action}",
-            "description": msg,
-            "color": color_map.get(action, 0x7289DA),
-            "footer": {
-                "text": f"MANLIX MANAGER | {now.strftime('%d/%m/%Y %H:%M:%S')}"
-            },
-            "fields": [
-                {
-                    "name": "Беседа",
-                    "value": chat_title,
-                    "inline": True
-                },
-                {
-                    "name": "Модератор",
-                    "value": mod_display,
-                    "inline": True
-                }
-            ]
-        }
-        
-        payload = {
-            "username": "MANLIX LOGS",
-            "avatar_url": "https://vk.com/images/community_100.png",
-            "embeds": [embed]
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(webhook_url, json=payload) as resp:
-                if resp.status not in (200, 204):
-                    print(f"[Discord] Ошибка отправки: {resp.status}")
-                    
-    except ImportError:
-        print("[Discord] aiohttp не установлен, пропускаем отправку в Discord")
-    except Exception as e:
-        print(f"[Discord] Ошибка отправки лога: {e}")
-
-@bot.on.message(text=["/addlogs", "/addlogs <args>"])
-async def addlogs_cmd(m: Message, args=None):
-    if not await check_access(m, "Специальный Руководитель"): return
-    
-    pid = str(m.peer_id)
-    ensure_chat(pid)
-    
-    if not args or not args.strip():
-        current_webhook = DATABASE["chats"][pid].get("discord_webhook")
-        if current_webhook:
-            masked = current_webhook[:30] + "..." + current_webhook[-10:] if len(current_webhook) > 40 else current_webhook
-            return await m.answer(
-                f"Вебхук Discord установлен.\n"
-                f"URL: {masked}\n\n"
-                f"Чтобы удалить: /addlogs remove"
-            )
-        else:
-            return await m.answer(
-                "Вебхук Discord не установлен.\n\n"
-                "Использование: /addlogs [URL вебхука]\n"
-                "Пример: /addlogs https://discord.com/api/webhooks/123456/abcdef\n\n"
-                "Чтобы удалить: /addlogs remove"
-            )
-    
-    if args.strip().lower() == "remove":
-        if DATABASE["chats"][pid].get("discord_webhook"):
-            DATABASE["chats"][pid]["discord_webhook"] = None
-            await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-            return await m.answer("Вебхук Discord успешно удален.")
-        else:
-            return await m.answer("Вебхук Discord не был установлен.")
-    
-    webhook_url = args.strip()
-    
-    if not webhook_url.startswith(("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")):
-        return await m.answer(
-            "Неверный формат вебхука.\n"
-            "URL должен начинаться с https://discord.com/api/webhooks/\n"
-            "Получить его можно в настройках канала Discord -> Интеграции -> Вебхуки"
-        )
-    
-    try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.get(webhook_url) as resp:
-                if resp.status == 200:
-                    webhook_data = await resp.json()
-                    channel_name = webhook_data.get("name", "Unknown")
-                else:
-                    return await m.answer(f"Не удалось проверить вебхук. Код ответа: {resp.status}")
-    except ImportError:
-        channel_name = "Unknown"
-    except Exception as e:
-        return await m.answer(f"Ошибка проверки вебхука: {e}")
-    
-    DATABASE["chats"][pid]["discord_webhook"] = webhook_url
-    await push_to_github(DATABASE, GH_PATH_DB, EXTERNAL_DB)
-    
-    a_display = await get_display_name(m.from_id, peer_id=m.peer_id)
-    await m.answer(
-        f"[id{m.from_id}|{a_display}] установил вебхук Discord для логов.\n"
-        f"Канал: {channel_name}\n\n"
-        f"Теперь все логи будут дублироваться в этот канал Discord."
-    )
 
 @bot.on.message(text="/texhelp")
 async def texhelp_cmd(m: Message):
@@ -2678,6 +2549,7 @@ async def get_info_cmd(m: Message, args=None):
     t_display = await get_display_name(t, peer_id=m.peer_id, use_nick=False)
     uid = str(t)
     
+    # ИСПРАВЛЕНО: используем правильный ключ "chats" вместо "чаты"
     owner_count = 0
     for chat_pid, chat_data in DATABASE.get("chats", {}).items():
         staff = chat_data.get("staff", {})
@@ -3022,10 +2894,10 @@ async def transfer(m: Message, args=None):
             return await m.answer("Укажите сумму. Пример: /перевести 100")
     else:
         if not args:
-            return await m.answer("Формат: /перевести [ссылка/упоминание] [сумма]\nИли ответом на сообщение: /перевести [сумма]")
+            return await m.answer("Формат: /перевести [ссылка] [сумма]\nИли ответом на сообщение: /перевести [сумма]")
         parts = args.split()
         if len(parts) < 2:
-            return await m.answer("Формат: /перевести [ссылка/упоминание] [сумма]")
+            return await m.answer("Формат: /перевести [ссылка] [сумма]")
         t = await get_target_id(m, parts[0])
         if not t:
             return await m.answer("Не удалось определить получателя.")
